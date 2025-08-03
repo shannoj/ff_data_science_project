@@ -1,4 +1,4 @@
-def QB_cleaning(file):
+def QB_cleaning(file, is_2022 = False):
 
     position = 'position'
     Quarterbacks = 'QB'
@@ -13,5 +13,8 @@ def QB_cleaning(file):
 
     PlayerStats_QB_cleaned_2 = PlayerStats_QB_cleaned.dropna(axis=1, how='all')
 
-    Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa','receiving_2pt_conversions', 'target_share','air_yards_share'])
+    if is_2022:
+        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
+    else:
+        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa','receiving_2pt_conversions', 'target_share','air_yards_share'])
     return Qb_Stats
