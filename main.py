@@ -25,57 +25,54 @@ PlayerStats2022 = PlayerStats2022.drop_duplicates()
 PlayerStats2023 = PlayerStats2023.drop_duplicates()
 PlayerStats2024 = PlayerStats2024.drop_duplicates()
 
-print(PlayerStats2021.passing_yards)
-
 QbStats2021 = QB_cleaning(PlayerStats2021)
 QbStats2022 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2022, is_2022=True))))
 QbStats2023 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2023))))
 QbStats2024 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2024, is_2022=True))))
-
-print(QbStats2021.passing_yards)
 
 QbStats2021 = add_year_suffix(QbStats2021, 2021)
 QbStats2022 = add_year_suffix(QbStats2022, 2022)
 QbStats2023 = add_year_suffix(QbStats2023, 2023)
 QbStats2024 = add_year_suffix(QbStats2024, 2024)
 
-print(QbStats2021.passing_yards_2021)
+QbStats2021 = QbStats2021.drop_duplicates(subset='player_id')
+QbStats2022 = QbStats2022.drop_duplicates(subset='player_id')
+QbStats2023 = QbStats2023.drop_duplicates(subset='player_id')
+QbStats2024 = QbStats2024.drop_duplicates(subset='player_id')
 
 QbStatsTotal = pd.merge(QbStats2021, QbStats2022, on='player_id', how='inner')
 QbStatsTotal = pd.merge(QbStatsTotal, QbStats2023, on='player_id', how='inner')
 QbStatsTotal = pd.merge(QbStatsTotal, QbStats2024, on='player_id', how='inner')
 
-QbStatsML = QbStats2021.dropna(subset=['fantasy_points_ppr_2021'])
+QbStatsML = QbStatsTotal.dropna(subset=['fantasy_points_ppr_2024'])
 
 QbStatsML2 = QbStatsML[~(QbStatsML == 0).all(axis=1)]
 
-y = QbStatsML2['fantasy_points_ppr_2021']
+print(QbStatsTotal.head())
+
+y = QbStatsML2['fantasy_points_ppr_2024']
 
 X = QbStatsML2[[col for col in QbStatsML.columns if 
-               any(year in col for year in ['2021', '2022', '2023']) and
+               any(year in col for year in ['2021', '2022', '2023', '2024']) and
                col != 'player_id']]
 
-X = X.drop('fantasy_points_ppr_2021', axis=1)
+X = X.drop('fantasy_points_ppr_2024', axis=1)
 
 X_imputed = imputer.fit_transform(X)
 
 X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.20, random_state=1)
 
-model = RandomForestRegressor(n_estimators=20, random_state=42)
+model = CatBoostRegressor(
+    iterations=50,
+    learning_rate=0.05,
+    depth=4,
+    loss_function='RMSE',
+    verbose= False  # Print every 100 iterations
+)
+
 model.fit(X_train, y_train)
 
 y_pred = model.predict(X_test)
 
-
 print(f"R² Score: {r2_score(y_test, y_pred):.2f}")
 print(f"RMSE: {np.sqrt(mean_squared_error(y_test, y_pred)):.2f}")
-
-# feature_importances = model.get_feature_importance()
-# feature_names = X.columns
-
-# plt.figure(figsize=(12, 6))
-# plt.barh(feature_names, feature_importances)
-# plt.xlabel("Importance")
-# plt.title("Feature Importance from CatBoost")
-# plt.tight_layout()
-# plt.show()
