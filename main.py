@@ -52,15 +52,19 @@ print(QbStatsTotal.head())
 
 y = QbStatsML2['fantasy_points_ppr_2024']
 
+player_ids = QbStatsML2['player_id']
+
 X = QbStatsML2[[col for col in QbStatsML.columns if 
                any(year in col for year in ['2021', '2022', '2023', '2024']) and
                col != 'player_id']]
 
 X = X.drop('fantasy_points_ppr_2024', axis=1)
 
-X_imputed = imputer.fit_transform(X)
+X_imputed = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
 
-X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.20, random_state=1)
+X_train, X_test, y_train, y_test, pid_train, pid_test = train_test_split(
+    X_imputed, y, player_ids, test_size=0.20, random_state=1
+)
 
 model = CatBoostRegressor(
     iterations=50,
@@ -73,6 +77,14 @@ model = CatBoostRegressor(
 model.fit(X_train, y_train)
 
 y_pred = model.predict(X_test)
+
+X_pred = X_test.copy()
+print(type(X_pred))
+X_pred['predicted_points'] = y_pred
+X_pred['player_id'] = pid_test.values
+
+top_players = X_pred.sort_values(by='predicted_points', ascending=False).head(5)
+print(top_players[['player_id', 'predicted_points']])
 
 print(f"R² Score: {r2_score(y_test, y_pred):.2f}")
 print(f"RMSE: {np.sqrt(mean_squared_error(y_test, y_pred)):.2f}")
