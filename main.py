@@ -21,10 +21,10 @@ PlayerStats2023 = pd.read_csv("../FF_DATA_SCIENCE_PROJECT/player_stats_2023.csv"
 PlayerStats2024 = pd.read_csv("../FF_DATA_SCIENCE_PROJECT/player_stats_2024.csv")
 
 
-QbStats2021 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2021))))
-QbStats2022 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2022, is_2022=True))))
-QbStats2023 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2023))))
-QbStats2024 = TDPoints(RushingPoints(PassingPoints(QB_cleaning(PlayerStats2024, is_2022=True))))
+QbStats2021 = (QB_cleaning(PlayerStats2021))
+QbStats2022 = (QB_cleaning(PlayerStats2022, is_2022=True))
+QbStats2023 = (QB_cleaning(PlayerStats2023))
+QbStats2024 = (QB_cleaning(PlayerStats2024, is_2022=True))
 
 
 QbStats2021 = add_year_suffix(QbStats2021, 2021)
@@ -58,7 +58,12 @@ QbStats2024['player_week_year'] = (
 
 drop_cols = ['player_id', 'week'] 
 
-print(QbStats2021.shape)
+
+print(QbStats2021.head())
+print(QbStats2022.head())
+print(QbStats2023.head())
+print(QbStats2024.head())
+print(QbStats2024.columns)
 
 QbStats2021.drop(columns=drop_cols, inplace=True, errors='ignore')
 QbStats2022.drop(columns=drop_cols, inplace=True, errors='ignore')
@@ -67,15 +72,20 @@ QbStats2024.drop(columns=drop_cols, inplace=True, errors='ignore')
 
 QbStatsTotal = pd.concat([QbStats2021, QbStats2022, QbStats2023, QbStats2024], axis=0)
 
-QbStatsML = QbStatsTotal.dropna(subset=['fantasy_points_ppr_2024'])
+QbStatsTotal = QbStatsTotal.fillna(0)
 
 print(QbStatsTotal.head())
+print(QbStatsTotal.shape)
 
-y = QbStatsML['fantasy_points_ppr_2024']
+y = QbStatsTotal['fantasy_points_ppr_2024']
 
-X = QbStatsML
+X = QbStatsTotal
 
-X = X.drop(['fantasy_points_ppr_2024','player_week_year'], axis=1)
+print(X.columns)
+
+X = X.drop(['fantasy_points_ppr_2024','fantasy_points_ppr_2023','fantasy_points_ppr_2022','fantasy_points_ppr_2021','player_week_year'], axis=1)
+
+print(X.columns)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.20, random_state=1
@@ -95,3 +105,8 @@ y_pred = model.predict(X_test)
 
 print(f"R² Score: {r2_score(y_test, y_pred):.2f}")
 print(f"RMSE: {np.sqrt(mean_squared_error(y_test, y_pred)):.2f}")
+
+
+y_pred_series = pd.Series(y_pred)
+y_pred_sorted = y_pred_series.sort_values(ascending=False)
+print(y_pred_sorted)
