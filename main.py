@@ -108,5 +108,9 @@ print(f"RMSE: {np.sqrt(mean_squared_error(y_test, y_pred)):.2f}")
 
 
 y_pred_series = pd.Series(y_pred)
+y_test_series = pd.Series(y_test)
 y_pred_sorted = y_pred_series.sort_values(ascending=False)
+y_test_sorted = y_test_series.sort_values(ascending=False)
+
 print(y_pred_sorted)
+print(y_test_sorted)
