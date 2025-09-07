@@ -1,5 +1,6 @@
 import requests
 import sqlite3
+from datetime import datetime, timezone
 
 sql_script_path = "/Users/jamesshannon/repos/ff_data_science_project/stadium_locations.sql"
 db_path = "/Users/jamesshannon/repos/ff_data_science_project/stadium_locations.db"
@@ -35,7 +36,7 @@ cleaned_sql = '\n'.join(sql_lines)
 
 try:
     # Execute the cleaned SQL script
-    conn.executescript(cleaned_sql)
+    #conn.executescript(cleaned_sql)
     print("Successfully loaded stadium data from SQL script")
 except sqlite3.Error as e:
     print(f"Error executing SQL script: {e}")
@@ -60,30 +61,44 @@ def get_weather_data(lat, lon, headers):
     
     # Step 2: Extract the forecast URL from the grid point data.
     forecast_url = grid_data['properties']['forecast']
+    hourly_forecast_url = grid_data['properties']['forecastHourly']
     
     # Step 3: Get the actual forecast data from the forecast URL.
     forecast_response = requests.get(forecast_url, headers=headers)
     forecast_response.raise_for_status()
     forecast_data = forecast_response.json()
+    forecast_response_hourly = requests.get(hourly_forecast_url, headers=headers)
+    forecast_response_hourly.raise_for_status()
+    forecast_data_hourly = forecast_response_hourly.json()
 
     # The detailed data is in a "periods" list within the response's 'properties'.
     # This example fetches data for the first forecast period (usually the current one).
     first_period = forecast_data['properties']['periods'][0]
-    
+    first_period_hourly = forecast_data_hourly['properties']['periods'][0]
+    start_time_str = first_period['startTime']
+    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
     # Return a dictionary with the desired data points.
     return {
         "temperature": first_period['temperature'],
         "short_forecast": first_period['shortForecast'],
         "wind_speed": first_period['windSpeed'],
+        "probability_of_precipitation": first_period['probabilityOfPrecipitation']['value'],
+        "relative_humidity": first_period_hourly['relativeHumidity']['value'],
+        "dew_point": round(first_period_hourly['dewpoint']['value'], 2),
+        "start_time": start_time
     }
 
 for team, lat, lon in stadiums:
     try:
         weather_data = get_weather_data(lat, lon, headers)
         print(f"=== {team} Stadium Forecast ===")
+        print(f"Start Time: {weather_data['start_time'].astimezone()}")
         print(f"Temperature: {weather_data['temperature']}°F")
         print(f"Wind Speed: {weather_data['wind_speed']}")
-        print(f"Forecast: {weather_data['short_forecast']}\n")
+        print(f"Forecast: {weather_data['short_forecast']}")
+        print(f"Precepitation Probabiliy: {weather_data['probability_of_precipitation']}%")
+        print(f"Relative Humidity: {weather_data['relative_humidity']}%")
+        print(f"Dew Point: {weather_data['dew_point']}°C\n")
 
         # Fixed: Use ? placeholders for SQLite instead of %s (which is for MySQL/PostgreSQL)
         insert_query = """
