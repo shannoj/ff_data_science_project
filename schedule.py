@@ -45,4 +45,6 @@ player_stats_final = player_stats_enhanced.merge(
     how='left'
 )
 
-player_stats_final.to_csv('enhanced_stats.csv', index=False)
+print(player_stats_final.shape)
+
+# player_stats_final.to_csv('enhanced_stats.csv', index=False)

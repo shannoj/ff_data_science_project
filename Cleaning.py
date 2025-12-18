@@ -12,7 +12,7 @@ def position_cleaning(df, position):
 
         PlayerStats_QB_cleaned_2 = PlayerStats_QB_cleaned.dropna(axis=1, how='all')
 
-        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['player_id','receiving_tds','player_display_name','season','season_type','recent_team','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
+        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['player_id','receiving_tds','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
 
         return Qb_Stats
     
@@ -20,7 +20,7 @@ def position_cleaning(df, position):
 
         PlayerStats_WR = df[df['position'] == position].copy()
 
-        WR_Stats = PlayerStats_WR.drop(columns=['player_id','player_display_name','season','season_type','recent_team','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
+        WR_Stats = PlayerStats_WR.drop(columns=['player_id','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
 
         drop_empty_cols = [col for col in WR_Stats.columns if (WR_Stats[col] == 0).all()]
 
@@ -34,7 +34,7 @@ def position_cleaning(df, position):
 
         PlayerStats_RB = df[df['position'] == position].copy()
 
-        RB_Stats = PlayerStats_RB.drop(columns=['player_id','player_display_name','season','season_type','recent_team','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
+        RB_Stats = PlayerStats_RB.drop(columns=['player_id','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
 
         drop_empty_cols = [col for col in RB_Stats.columns if (RB_Stats[col] == 0).all()]
 
@@ -48,7 +48,7 @@ def position_cleaning(df, position):
 
         PlayerStats_TE = df[df['position'] == position].copy()
 
-        TE_Stats = PlayerStats_TE.drop(columns=['player_id','player_display_name','season','season_type','recent_team','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
+        TE_Stats = PlayerStats_TE.drop(columns=['player_id','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url'])
 
         drop_empty_cols = [col for col in TE_Stats.columns if (TE_Stats[col] == 0).all()]
 

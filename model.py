@@ -9,7 +9,8 @@ def predict_category(stat, df):
 
     X = df
 
-    X = X.drop([stat], axis = 1)
+    targets_to_drop = ['passing_yards', 'passing_tds', stat]
+    X = df.drop(columns=[col for col in targets_to_drop if col in df.columns], errors='ignore')
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.20, random_state=1
