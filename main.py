@@ -4,6 +4,9 @@ from model import predict_category
 from predict_future import create_qb_prediction_features
 from future_games_features import get_current_week
 import joblib
+from weather import update_stadium_forecasts
+
+#update_stadium_forecasts()
 
 PlayerStats2025 = pd.read_csv("../FF_DATA_SCIENCE_PROJECT/enhanced_stats_2025.csv", low_memory=False)
 
@@ -43,6 +46,5 @@ print(pred_tds)
 
 print(pred_yards_staff)
 print(pred_tds_staff)
-
 
 

@@ -19,8 +19,6 @@ player_stats = nfl.load_player_stats([2025]).to_pandas()
 
 player_stats = player_stats[player_stats['week'].between(1, 15)]
 
-print(player_stats.columns)
-
 team_stats_polars = nfl.load_team_stats([2025])
 
 team_stats_2025 = team_stats_polars.to_pandas()

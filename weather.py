@@ -2,13 +2,16 @@ import requests
 import mysql.connector
 from datetime import datetime
 import time
+import os
+from dotenv import load_dotenv
 
 # Database configuration
+load_dotenv()
 db_config = {
-    'host': 'localhost',
-    'user': 'root',  # or your MySQL username
-    'password': 'Shannon12!',  # Replace with your actual password
-    'database': 'nfl_stadiums'
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD'),
+        'database': 'nfl_stadiums'
 }
 
 def get_weather_forecast(lat, lon):

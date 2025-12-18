@@ -1,10 +1,64 @@
 import pandas as pd
+import mysql.connector
+from dotenv import load_dotenv
+import os
+
+
+def get_game_weather_forecast(team, is_home, opponent):
+    """
+    Get weather forecast from your NFL stadiums database
+    """
+    load_dotenv()
+    
+    db_config = {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD'),
+        'database': 'nfl_stadiums'
+    }
+    
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get forecast for the stadium where game is being played
+        stadium_team = team if is_home == 1 else opponent
+        
+        query = """
+            SELECT team, temperature, wind_speed, forecast, timestamp
+            FROM stadium_forecasts
+            WHERE team = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """
+        
+        cursor.execute(query, (stadium_team,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result:
+            # Parse wind speed (remove ' mph' if present)
+            wind = result['wind_speed'].replace(' mph', '') if result['wind_speed'] else '0'
+            
+            return {
+                'temp': result['temperature'],
+                'wind': float(wind),
+                'forecast': result['forecast']
+            }
+        else:
+            print(f"No weather data found for {stadium_team}")
+            return None
+            
+    except Exception as e:
+        print(f"Error fetching weather: {e}")
+        return None
+
+
 
 def create_qb_prediction_features(player_name, team, opponent, is_home, 
                                    week, historical_data, num_recent_games=5):
-    """
-    Create prediction features that match the training data structure
-    """
     # Get player's recent games (before prediction week)
     player_history = historical_data[
         (historical_data['player_name'] == player_name) &
@@ -15,11 +69,8 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
         print(f"No history for {player_name}")
         return None
     
-    # START WITH THE MOST RECENT GAME AS A TEMPLATE
-    # This ensures we have ALL columns the model expects
     template = player_history.iloc[0:1].copy()
     
-    # Update game-specific information
     template['week'] = week
     template['team'] = team
     template['opponent'] = opponent
@@ -46,9 +97,15 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
     ]
     
     if not opponent_games.empty:
-        def_cols = [col for col in opponent_games.columns if 'opponent_def_' in col]
+        def_cols = [col for col in opponent_games.columns if 'opponent_def' in col]
         for col in def_cols:
             template[col] = opponent_games[col].mean()
+
+    weather = get_game_weather_forecast(team, is_home, opponent)
+
+    template['temp'] = weather['temp']
+    template['wind'] = weather['wind']
+
     
     if is_home == 0:
         opponent_home_games = historical_data[
@@ -58,10 +115,6 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
         ]
         
         if not opponent_home_games.empty:
-            if 'temp' in opponent_home_games.columns:
-                template['temp'] = opponent_home_games['temp'].mean()
-            if 'wind' in opponent_home_games.columns:
-                template['wind'] = opponent_home_games['wind'].mean()
             if 'roof' in opponent_home_games.columns:
                 mode_roof = opponent_home_games['roof'].mode()
                 if len(mode_roof) > 0:

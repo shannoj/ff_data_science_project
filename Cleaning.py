@@ -59,6 +59,7 @@ def position_cleaning(df, position):
         return PlayerStats_TE_cleaned_2
 
 def add_year_suffix(df, year):
+    
     return df.rename(columns={col: f"{col}_{year}" for col in df.columns if col != 'player_id'})
 
 def handle_categoricals(df):
