@@ -61,8 +61,6 @@ player_stats_final = player_stats_enhanced.merge(
     how='left'
 )
 
-print(player_stats_final.columns)
-
 #player_stats_final.to_csv('enhanced_stats_2025.csv', index=False)
 
 
