@@ -1,122 +1,152 @@
 import requests
-import sqlite3
-from datetime import datetime, timezone
+import mysql.connector
+from datetime import datetime
+import time
 
-sql_script_path = "/Users/jamesshannon/repos/ff_data_science_project/stadium_locations.sql"
-db_path = "/Users/jamesshannon/repos/ff_data_science_project/stadium_locations.db"
+# Database configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',  # or your MySQL username
+    'password': 'Shannon12!',  # Replace with your actual password
+    'database': 'nfl_stadiums'
+}
 
-# Create database from the SQL script file
-conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-# Read and clean the SQL script to make it SQLite compatible
-with open(sql_script_path, 'r') as f:
-    sql_content = f.read()
-
-# Clean up common MySQL/PostgreSQL syntax that doesn't work in SQLite
-sql_lines = []
-for line in sql_content.split('\n'):
-    line = line.strip()
-    
-    # Skip these types of statements that SQLite doesn't need/support
-    if (line.upper().startswith('CREATE DATABASE') or 
-        line.upper().startswith('USE ') or
-        line.upper().startswith('SET ') or
-        line.upper().startswith('DROP DATABASE') or
-        line == '' or 
-        line.startswith('--')):
-        continue
-    
-    # Convert AUTO_INCREMENT to AUTOINCREMENT for SQLite
-    line = line.replace('AUTO_INCREMENT', 'AUTOINCREMENT')
-    
-    sql_lines.append(line)
-
-cleaned_sql = '\n'.join(sql_lines)
-
-try:
-    # Execute the cleaned SQL script
-    #conn.executescript(cleaned_sql)
-    print("Successfully loaded stadium data from SQL script")
-except sqlite3.Error as e:
-    print(f"Error executing SQL script: {e}")
-    print("First few lines of the cleaned SQL:")
-    print('\n'.join(cleaned_sql.split('\n')[:10]))
-    exit(1)
-
-# The stadium_forecasts table is already created from your SQL file
-# No need to create it again
-
-cursor.execute("SELECT team, latitude, longitude FROM stadium_locations")
-stadiums = cursor.fetchall()
-
-headers = {'User-Agent': '(MyWeatherApp, shannman6@gmail.com)'}
-
-def get_weather_data(lat, lon, headers):
-    # Step 1: Get the grid point data from the /points endpoint.
-    points_url = f"https://api.weather.gov/points/{lat},{lon}"
-    response = requests.get(points_url, headers=headers)
-    response.raise_for_status()
-    grid_data = response.json()
-    
-    # Step 2: Extract the forecast URL from the grid point data.
-    forecast_url = grid_data['properties']['forecast']
-    hourly_forecast_url = grid_data['properties']['forecastHourly']
-    
-    # Step 3: Get the actual forecast data from the forecast URL.
-    forecast_response = requests.get(forecast_url, headers=headers)
-    forecast_response.raise_for_status()
-    forecast_data = forecast_response.json()
-    forecast_response_hourly = requests.get(hourly_forecast_url, headers=headers)
-    forecast_response_hourly.raise_for_status()
-    forecast_data_hourly = forecast_response_hourly.json()
-
-    # The detailed data is in a "periods" list within the response's 'properties'.
-    # This example fetches data for the first forecast period (usually the current one).
-    first_period = forecast_data['properties']['periods'][0]
-    first_period_hourly = forecast_data_hourly['properties']['periods'][0]
-    start_time_str = first_period['startTime']
-    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-    # Return a dictionary with the desired data points.
-    return {
-        "temperature": first_period['temperature'],
-        "short_forecast": first_period['shortForecast'],
-        "wind_speed": first_period['windSpeed'],
-        "probability_of_precipitation": first_period['probabilityOfPrecipitation']['value'],
-        "relative_humidity": first_period_hourly['relativeHumidity']['value'],
-        "dew_point": round(first_period_hourly['dewpoint']['value'], 2),
-        "start_time": start_time
+def get_weather_forecast(lat, lon):
+    """
+    Fetch weather forecast using Open-Meteo API (free, no API key needed)
+    """
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        'latitude': lat,
+        'longitude': lon,
+        'current': 'temperature_2m,wind_speed_10m,weather_code',
+        'temperature_unit': 'fahrenheit',
+        'wind_speed_unit': 'mph',
+        'timezone': 'America/New_York'
     }
-
-for team, lat, lon in stadiums:
+    
     try:
-        weather_data = get_weather_data(lat, lon, headers)
-        print(f"=== {team} Stadium Forecast ===")
-        print(f"Start Time: {weather_data['start_time'].astimezone()}")
-        print(f"Temperature: {weather_data['temperature']}°F")
-        print(f"Wind Speed: {weather_data['wind_speed']}")
-        print(f"Forecast: {weather_data['short_forecast']}")
-        print(f"Precepitation Probabiliy: {weather_data['probability_of_precipitation']}%")
-        print(f"Relative Humidity: {weather_data['relative_humidity']}%")
-        print(f"Dew Point: {weather_data['dew_point']}°C\n")
-
-        # Fixed: Use ? placeholders for SQLite instead of %s (which is for MySQL/PostgreSQL)
-        insert_query = """
-        INSERT INTO stadium_forecasts (team, temperature, wind_speed, forecast)
-        VALUES (?, ?, ?, ?)
-        """
-        cursor.execute(insert_query, (
-            team,
-            weather_data['temperature'],
-            weather_data['wind_speed'],
-            weather_data['short_forecast']
-        ))
-        conn.commit()
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching weather for {team}: {e}")
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Weather code to description mapping
+        weather_codes = {
+            0: 'Clear sky',
+            1: 'Mainly clear',
+            2: 'Partly cloudy',
+            3: 'Overcast',
+            45: 'Foggy',
+            48: 'Depositing rime fog',
+            51: 'Light drizzle',
+            53: 'Moderate drizzle',
+            55: 'Dense drizzle',
+            61: 'Slight rain',
+            63: 'Moderate rain',
+            65: 'Heavy rain',
+            71: 'Slight snow',
+            73: 'Moderate snow',
+            75: 'Heavy snow',
+            80: 'Slight rain showers',
+            81: 'Moderate rain showers',
+            82: 'Violent rain showers',
+            95: 'Thunderstorm',
+            96: 'Thunderstorm with hail'
+        }
+        
+        current = data['current']
+        temperature = int(current['temperature_2m'])
+        wind_speed = f"{current['wind_speed_10m']} mph"
+        weather_code = current['weather_code']
+        forecast = weather_codes.get(weather_code, 'Unknown')
+        
+        return temperature, wind_speed, forecast
+    
     except Exception as e:
-        print(f"Error processing data for {team}: {e}")
+        print(f"Error fetching weather: {e}")
+        return None, None, None
 
-# Close the database connection
-conn.close()
+def update_stadium_forecasts():
+    """
+    Fetch weather for all stadiums and update database
+    """
+    try:
+        # Connect to database
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        
+        # Get all stadium locations
+        cursor.execute("SELECT team, latitude, longitude FROM stadium_locations")
+        stadiums = cursor.fetchall()
+        
+        print(f"Fetching weather for {len(stadiums)} stadiums...")
+        
+        for team, lat, lon in stadiums:
+            print(f"Getting weather for {team}...", end=' ')
+            
+            temperature, wind_speed, forecast = get_weather_forecast(lat, lon)
+            
+            if temperature is not None:
+                # Insert forecast into database
+                insert_query = """
+                    INSERT INTO stadium_forecasts (team, temperature, wind_speed, forecast)
+                    VALUES (%s, %s, %s, %s)
+                """
+                cursor.execute(insert_query, (team, temperature, wind_speed, forecast))
+                print(f"✓ {temperature}°F, {wind_speed}, {forecast}")
+            else:
+                print("✗ Failed")
+            
+            # Be nice to the API - small delay between requests
+            time.sleep(0.5)
+        
+        conn.commit()
+        print(f"\n✓ Updated forecasts for all stadiums at {datetime.now()}")
+        
+    except mysql.connector.Error as e:
+        print(f"Database error: {e}")
+    
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def view_latest_forecasts():
+    """
+    Display the latest forecasts from database
+    """
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT team, temperature, wind_speed, forecast, timestamp
+            FROM stadium_forecasts
+            ORDER BY timestamp DESC
+            LIMIT 32
+        """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        print("\n" + "="*80)
+        print("LATEST NFL STADIUM WEATHER FORECASTS")
+        print("="*80)
+        
+        for team, temp, wind, forecast, timestamp in results:
+            print(f"{team:6} | {temp:3}°F | {wind:12} | {forecast:20} | {timestamp}")
+        
+    except mysql.connector.Error as e:
+        print(f"Database error: {e}")
+    
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+if __name__ == "__main__":
+    # Update forecasts
+    update_stadium_forecasts()
+    
+    # View results
+    view_latest_forecasts()
