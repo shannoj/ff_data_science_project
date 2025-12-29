@@ -1,5 +1,6 @@
 import pandas as pd
 import nflreadpy as nfl
+from features import completion_percent
 
 def get_current_week():
     
@@ -17,13 +18,13 @@ def get_current_week():
 
 player_stats = nfl.load_player_stats([2025]).to_pandas()
 
-player_stats = player_stats[player_stats['week'].between(1, 15)]
+player_stats = player_stats[player_stats['week'].between(1, 16)]
 
 team_stats_polars = nfl.load_team_stats([2025])
 
 team_stats_2025 = team_stats_polars.to_pandas()
 
-team_stats_2025 = team_stats_2025[team_stats_2025['week'].between(1, 15)]
+team_stats_2025 = team_stats_2025[team_stats_2025['week'].between(1, 16)]
 
 def_stats_2025 = team_stats_2025[['week', 'team', 'def_tackles_solo', 'def_tackles_with_assist', 'def_tackle_assists', 'def_tackles_for_loss', 'def_tackles_for_loss_yards', 'def_fumbles_forced', 'def_sacks', 'def_sack_yards', 'def_qb_hits', 'def_interceptions', 'def_interception_yards', 'def_pass_defended', 'def_tds', 'def_fumbles', 'def_safeties']].copy()
 
@@ -33,7 +34,7 @@ schedule_2025_polars = nfl.load_schedules([2025])
 
 schedule_2025 = schedule_2025_polars.to_pandas()
 
-schedule_2025 = schedule_2025[schedule_2025['week'].between(1, 15)]
+schedule_2025 = schedule_2025[schedule_2025['week'].between(1, 16)]
 
 home_games = schedule_2025[['week', 'home_team', 'roof', 'surface', 'temp', 'wind']].copy()
 home_games['is_home'] = 1
@@ -59,6 +60,8 @@ player_stats_final = player_stats_enhanced.merge(
     how='left'
 )
 
-#player_stats_final.to_csv('enhanced_stats_2025.csv', index=False)
+player_stats_final_2 = completion_percent(player_stats_final)
+
+#player_stats_final.to_csv('enhanced_stats_2025_2.csv', index=False)
 
 

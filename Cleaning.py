@@ -1,4 +1,5 @@
 from sklearn.preprocessing import LabelEncoder
+from features import completion_percent
 
 def position_cleaning(df, position):
 
@@ -6,13 +7,21 @@ def position_cleaning(df, position):
 
         PlayerStats_QB = df[df['position'] == position].copy()
 
+        PlayerStats_QB = completion_percent(PlayerStats_QB)
+
         drop_empty_cols = [col for col in PlayerStats_QB.columns if (PlayerStats_QB[col] == 0).all()]
 
-        PlayerStats_QB_cleaned = PlayerStats_QB.drop(columns=drop_empty_cols)
+        drop_cols = [col for col in PlayerStats_QB.columns if col.startswith('fg') or col.startswith('pat') or col.startswith('pat') or col.startswith('punt') or col.startswith('kickoff') or col.startswith('gwfg') or col.startswith('fumble') or col.startswith('rushing')]
+
+        def_own_cols = [col for col in PlayerStats_QB.columns if col.startswith('def_') and col.endswith('_x')]
+
+        cols_to_drop = drop_empty_cols + drop_cols + def_own_cols
+
+        PlayerStats_QB_cleaned = PlayerStats_QB.drop(columns= cols_to_drop)
 
         PlayerStats_QB_cleaned_2 = PlayerStats_QB_cleaned.dropna(axis=1, how='all')
 
-        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['player_id','receiving_tds','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
+        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['carries', 'passing_2pt_conversions', 'completions', 'attempts', 'passing_tds','passing_interceptions','sacks_suffered','sack_yards_lost','sack_fumbles','sack_fumbles_lost','passing_air_yards','passing_yards_after_catch','passing_first_downs','player_id','receiving_tds','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
 
         return Qb_Stats
     

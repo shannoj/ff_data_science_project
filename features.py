@@ -9,3 +9,9 @@ def RushingPoints(df):
 def TDPoints(df):
     df['TD_Points'] = (df.rushing_tds + df.passing_tds)*6
     return df
+
+def completion_percent(df):
+
+    df['comp_percent'] = (df.completions / df.attempts)
+
+    return df

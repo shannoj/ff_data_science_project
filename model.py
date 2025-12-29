@@ -2,14 +2,17 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
 
-def predict_category(stat, df):
+def predict_category(stat, df, estimators):
 
     y = df[stat]
 
     X = df
 
-    targets_to_drop = ['passing_yards', 'passing_tds', stat]
+    targets_to_drop = [stat]
+
     X = df.drop(columns=[col for col in targets_to_drop if col in df.columns], errors='ignore')
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -17,7 +20,7 @@ def predict_category(stat, df):
     )
 
     model = RandomForestRegressor(
-        n_estimators=50,      
+        n_estimators=estimators,      
         max_depth=4,          
         random_state=42,      
         verbose=0,            
@@ -31,4 +34,40 @@ def predict_category(stat, df):
     r2 = r2_score(y_test, predictions)
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
 
-    return r2, rmse, model
+    model_features = X.columns.tolist()
+
+    return r2, rmse, model, model_features
+
+def predict_category_xg(stat, df):
+
+    y = df[stat]
+
+    X = df
+
+    targets_to_drop = [stat]
+
+    X = df.drop(columns=[col for col in targets_to_drop if col in df.columns], errors='ignore')
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, random_state=1
+    )
+
+    model = XGBRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42
+    )
+
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+
+    r2 = r2_score(y_test, predictions)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+
+    model_features = X.columns.tolist()
+
+    return r2, rmse, model, model_features
