@@ -29,8 +29,11 @@ def train_model(QbStats2025):
 PlayerStats2025, QbStats2025 = load_data()
 yards_model, model_features, X_train, y_train, r2, rmse = train_model(QbStats2025)
 
-qb_list = sorted(QbStats2025['player_name'].unique())
-
+# Get list of QBs from the original data, filtered for QBs only
+qb_list = sorted([
+    str(name) for name in PlayerStats2025[PlayerStats2025['position'] == 'QB']['player_name'].unique() 
+    if pd.notna(name)
+])
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -38,7 +41,7 @@ with col1:
     
     selected_qb = st.selectbox("Select Quarterback", qb_list, index=qb_list.index('P.Mahomes') if 'P.Mahomes' in qb_list else 0)
 
-    qb_team = QbStats2025[QbStats2025['player_name'] == selected_qb]['team'].iloc[0]
+    qb_team = PlayerStats2025[PlayerStats2025['player_name'] == selected_qb]['team'].iloc[0]
     
     col1a, col1b, col1c = st.columns(3)
     
@@ -120,10 +123,10 @@ if st.button("Generate Prediction", type="primary"):
         
         with st.expander("View Key Features"):
             feature_df = pd.DataFrame({
-                'Feature': ['Recent Avg Yards', 'Recent Form', 'Home/Away', 'Opponent', 'Weather'],
+                'Feature': ['Passer Rating', 'Passing EPA', 'Home/Away', 'Opponent', 'Weather'],
                 'Value': [
-                    f"{qb_predictions['passing_yards_recent'].iloc[0]:.0f}" if 'passing_yards_recent' in qb_predictions else 'N/A',
-                    f"{qb_predictions['win_rate_90d'].iloc[0]:.2%}" if 'win_rate_90d' in qb_predictions else 'N/A',
+                    f"{qb_predictions['passer_rating'].iloc[0]:.0f}" if 'passer_rating' in qb_predictions else 'N/A',
+                    f"{qb_predictions['passing_epa'].iloc[0]:.2%}" if 'passing_epa' in qb_predictions else 'N/A',
                     is_home,
                     opponent,
                     f"{qb_predictions['temp'].iloc[0]:.0f}°F" if 'temp' in qb_predictions else 'N/A'
