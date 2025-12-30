@@ -2,63 +2,64 @@ import pandas as pd
 import mysql.connector
 from dotenv import load_dotenv
 import os
+from weather import get_game_weather_forecast
 
 
-def get_game_weather_forecast(team, is_home, opponent):
-    """
-    Get weather forecast from your NFL stadiums database
-    """
-    load_dotenv()
+# def get_game_weather_forecast(team, is_home, opponent):
+#     """
+#     Get weather forecast from your NFL stadiums database
+#     """
+#     load_dotenv()
     
-    db_config = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'user': os.getenv('DB_USER', 'root'),
-        'password': os.getenv('DB_PASSWORD'),
-        'database': 'nfl_stadiums'
-    }
+#     db_config = {
+#         'host': os.getenv('DB_HOST', 'localhost'),
+#         'user': os.getenv('DB_USER', 'root'),
+#         'password': os.getenv('DB_PASSWORD'),
+#         'database': 'nfl_stadiums'
+#     }
     
-    try:
-        conn = mysql.connector.connect(**db_config)
-        cursor = conn.cursor(dictionary=True)
+#     try:
+#         conn = mysql.connector.connect(**db_config)
+#         cursor = conn.cursor(dictionary=True)
         
-        # Get forecast for the stadium where game is being played
-        stadium_team = team if is_home == 1 else opponent
+#         # Get forecast for the stadium where game is being played
+#         stadium_team = team if is_home == 1 else opponent
         
-        query = """
-            SELECT team, temperature, wind_speed, forecast, timestamp
-            FROM stadium_forecasts
-            WHERE team = %s
-            ORDER BY timestamp DESC
-            LIMIT 1
-        """
+#         query = """
+#             SELECT team, temperature, wind_speed, forecast, timestamp
+#             FROM stadium_forecasts
+#             WHERE team = %s
+#             ORDER BY timestamp DESC
+#             LIMIT 1
+#         """
         
-        cursor.execute(query, (stadium_team,))
-        result = cursor.fetchone()
+#         cursor.execute(query, (stadium_team,))
+#         result = cursor.fetchone()
         
-        cursor.close()
-        conn.close()
+#         cursor.close()
+#         conn.close()
         
-        if result:
-            # Parse wind speed (remove ' mph' if present)
-            wind = result['wind_speed'].replace(' mph', '') if result['wind_speed'] else '0'
+#         if result:
+#             # Parse wind speed (remove ' mph' if present)
+#             wind = result['wind_speed'].replace(' mph', '') if result['wind_speed'] else '0'
             
-            return {
-                'temp': result['temperature'],
-                'wind': float(wind),
-                'forecast': result['forecast']
-            }
-        else:
-            print(f"No weather data found for {stadium_team}")
-            return None
+#             return {
+#                 'temp': result['temperature'],
+#                 'wind': float(wind),
+#                 'forecast': result['forecast']
+#             }
+#         else:
+#             print(f"No weather data found for {stadium_team}")
+#             return None
             
-    except Exception as e:
-        print(f"Error fetching weather: {e}")
-        return None
+#     except Exception as e:
+#         print(f"Error fetching weather: {e}")
+#         return None
 
 
 
 def create_qb_prediction_features(player_name, team, opponent, is_home, 
-                                   week, historical_data, num_recent_games=5):
+                                   week, historical_data, num_recent_games=5, game_date=None):
     
     # Get player's recent games (before prediction week)
 
@@ -105,10 +106,20 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
         for col in def_cols:
             template[col] = opponent_games[col].mean()
 
-    weather = get_game_weather_forecast(team, is_home, opponent)
+    if game_date is None:
 
-    template['temp'] = weather['temp']
-    template['wind'] = weather['wind']
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        days_until_sunday = (6 - today.weekday()) % 7
+        if days_until_sunday == 0:
+            days_until_sunday = 7
+        game_date = today + timedelta(days=days_until_sunday)
+        game_date = game_date.replace(hour=13, minute=0, second=0)
+    
+    weather = get_game_weather_forecast(team, is_home, opponent, game_date)
+    
+    template['temp'] = weather['temp'] if weather['temp'] is not None else 70  
+    template['wind'] = weather['wind'] if weather['wind'] is not None else 5 
 
     
     if is_home == 0:
