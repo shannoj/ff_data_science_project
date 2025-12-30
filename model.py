@@ -4,6 +4,26 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
+from sklearn.utils import resample
+
+def bootstrap_predictions(model, X_train, y_train, X_pred, n_iterations=100):
+    predictions = []
+    
+    for i in range(n_iterations):
+        X_boot, y_boot = resample(X_train, y_train, random_state=i)
+        
+        model.fit(X_boot, y_boot)
+
+        pred = model.predict(X_pred)
+        predictions.append(pred[0])
+    
+    predictions = np.array(predictions)
+    
+    lower = np.percentile(predictions, 10)
+    median = np.percentile(predictions, 50)
+    upper = np.percentile(predictions, 90)
+    
+    return lower, median, upper
 
 def predict_category(stat, df, estimators):
 
@@ -70,4 +90,4 @@ def predict_category_xg(stat, df):
 
     model_features = X.columns.tolist()
 
-    return r2, rmse, model, model_features
+    return r2, rmse, model, model_features, X_train, y_train

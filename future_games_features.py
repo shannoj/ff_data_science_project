@@ -36,6 +36,12 @@ schedule_2025 = schedule_2025_polars.to_pandas()
 
 schedule_2025 = schedule_2025[schedule_2025['week'].between(1, 16)]
 
+adv_stats_2025 = nfl.load_nextgen_stats([2025]).to_pandas()
+
+adv_stats_2025 = adv_stats_2025[adv_stats_2025['week'].between(1, 16)]
+
+adv_stats_2025_qb = adv_stats_2025[['week', 'player_display_name', 'avg_time_to_throw','aggressiveness', 'passer_rating','expected_completion_percentage','completion_percentage_above_expectation']].copy()
+
 home_games = schedule_2025[['week', 'home_team', 'roof', 'surface', 'temp', 'wind']].copy()
 home_games['is_home'] = 1
 home_games.rename(columns={'home_team': 'team'}, inplace=True)
@@ -62,6 +68,12 @@ player_stats_final = player_stats_enhanced.merge(
 
 player_stats_final_2 = completion_percent(player_stats_final)
 
-#player_stats_final.to_csv('enhanced_stats_2025_2.csv', index=False)
+player_stats_final_3 = player_stats_final_2.merge(
+    adv_stats_2025_qb,
+    on=['week', 'player_display_name'],
+    how = 'left'
+)
+
+player_stats_final_3.to_csv('enhanced_stats_2025_3.csv', index=False)
 
 

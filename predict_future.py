@@ -61,8 +61,17 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
                                    week, historical_data, num_recent_games=5):
     
     # Get player's recent games (before prediction week)
-    player_history = historical_data[
+
+    current_player = historical_data[
         (historical_data['player_name'] == player_name) &
+        (historical_data['team'] == team)
+    ]
+
+    player_id = current_player['player_id'].iloc[0]
+
+
+    player_history = historical_data[
+        (historical_data['player_id'] == player_id) &
         (historical_data['week'] < week)
     ].sort_values('week', ascending=False).head(num_recent_games)
     
@@ -79,7 +88,7 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
     
     stat_cols = [
         'passing_epa',
-        'passing_cpoe', 'pacr', 'comp_percent'
+        'passing_cpoe', 'pacr', 'comp_percent', 'avg_time_to_throw','aggressiveness', 'passer_rating','expected_completion_percentage','completion_percentage_above_expectation' 
     ]
     
     for col in stat_cols:
@@ -87,7 +96,7 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
             template[col] = player_history[col].mean()
     
     opponent_games = historical_data[
-        (historical_data['opponent'] == opponent) &
+        (historical_data['team'] == opponent) &
         (historical_data['week'] < week)
     ]
     
