@@ -21,13 +21,16 @@ def load_data():
     return PlayerStats2025, QbStats2025
 
 @st.cache_resource
-def train_model(QbStats2025):
-    QbStats2025_encoded = handle_categoricals(QbStats2025)
-    r2, rmse, model, features, X_train, y_train = predict_category_xg('passing_yards', QbStats2025_encoded)
-    return model, features, X_train, y_train, r2, rmse
+def load_model():
+    """Load pre-trained model instead of training from scratch"""
+    model = joblib.load('qb_yards_model.pkl')
+    features = joblib.load('model_features.pkl')
+    metrics = joblib.load('model_metrics.pkl')
+    return model, features, metrics['r2'], metrics['rmse']
 
-PlayerStats2025, QbStats2025 = load_data()
-yards_model, model_features, X_train, y_train, r2, rmse = train_model(QbStats2025)
+with st.spinner("Loading model..."):
+    PlayerStats2025, QbStats2025 = load_data()
+    yards_model, model_features, X_train, y_train, r2, rmse = load_model()
 
 # Get list of QBs from the original data, filtered for QBs only
 qb_list = sorted([
