@@ -55,6 +55,7 @@ with col1:
 
 with col2:
     st.subheader("Advanced Options")
+    st.subheader("Be wary of results if the player did not play in any games within the average window selected")
     num_games = st.slider("Recent games to average", 3, 12, 5)
     show_confidence = st.checkbox("Show confidence intervals", value=True)
     run_bootstrap = st.checkbox("Run bootstrap (slower)", value=False)
