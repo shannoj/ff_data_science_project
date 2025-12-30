@@ -3,6 +3,7 @@ import mysql.connector
 from datetime import datetime, timedelta
 import time
 import os
+import pandas as pd
 from dotenv import load_dotenv
 
 # Database configuration
@@ -17,6 +18,7 @@ db_config = {
 def get_weather_forecast(lat, lon, forecast_date=None):
     
     url = "https://api.open-meteo.com/v1/forecast"
+    
     if forecast_date is None:
         params = {
             'latitude': lat,

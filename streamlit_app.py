@@ -16,7 +16,7 @@ st.markdown("Predicting passing yards using machine learning and game context")
 
 @st.cache_data
 def load_data():
-    PlayerStats2025 = pd.read_csv("../FF_DATA_SCIENCE_PROJECT/enhanced_stats_2025_3.csv", low_memory=False)
+    PlayerStats2025 = pd.read_csv("enhanced_stats_2025_3.csv", low_memory=False)
     QbStats2025 = position_cleaning(PlayerStats2025, 'QB')
     return PlayerStats2025, QbStats2025
 

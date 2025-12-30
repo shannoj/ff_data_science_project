@@ -1,14 +1,8 @@
-import pandas as pd
-import mysql.connector
-from dotenv import load_dotenv
-import os
-from weather import get_game_weather_forecast
+from weather_csv import get_game_weather_forecast
 
 
 def create_qb_prediction_features(player_name, team, opponent, is_home, 
                                    week, historical_data, num_recent_games=5, game_date=None):
-    
-    # Get player's recent games (before prediction week)
 
     current_player = historical_data[
         (historical_data['player_name'] == player_name) &
