@@ -25,16 +25,15 @@ def position_cleaning(df, position):
 
         PlayerStats_QB_cleaned_2 = PlayerStats_QB_cleaned.dropna(axis=1, how='all')
 
-        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['carries', 'passing_2pt_conversions', 'completions', 'attempts', 'passing_tds','passing_interceptions','sacks_suffered','sack_yards_lost','sack_fumbles','sack_fumbles_lost','passing_air_yards','passing_yards_after_catch','passing_first_downs','player_id','receiving_tds','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
+        Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['carries', 'passing_2pt_conversions', 'completions', 'attempts', 'passing_tds','passing_interceptions','sacks_suffered','sack_yards_lost','sack_fumbles','sack_fumbles_lost','passing_air_yards','passing_yards_after_catch','passing_first_downs','player_id','receiving_tds','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share', 'penalties', 'penalty_yards', 'fantasy_points_ppr', 'player_display_name'])
 
         QbStats_enhanced = Qb_Stats.merge(
                 defense_stats,
-                left_on=['opponent', 'week'],
-                right_on=['def_team', 'week'],
+                on=['week', 'opponent'],
                 how='left'
-            ).drop(columns=['def_team'])
+            )
         
-        #QbStats_enhanced = QbStats_enhanced.drop(columns=['passing_yards_y'])
+        QbStats_enhanced = QbStats_enhanced.drop(columns=['team', 'opponent', 'week'])
 
         return QbStats_enhanced
     

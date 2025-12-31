@@ -30,35 +30,32 @@ def avg_pass_yards_allow(df):
 
     df_yards = df_2[(df_2['position'] == 'QB') & (df_2['passing_yards'] > 0)].copy()
 
-    df_yards = df_yards.rename(columns={'opponent': 'def_team'})
+    #df_yards = df_yards.rename(columns={'opponent': 'def_team'})
 
     df_yards = df_yards.drop('position', axis=1)
-
-    df_yards = df_yards.sort_values(['def_team', 'week'])
-
-    df_yards['cumulative_avg'] = df_yards.groupby('def_team')['passing_yards'].expanding().mean().reset_index(level=0, drop=True)
-
-    df_yards['def_recent_avg_allowed'] = df_yards.groupby('def_team')['passing_yards'].rolling(window=3, min_periods=1).mean().reset_index(level=0, drop=True)
+    df_yards = df_yards.sort_values(['opponent', 'week'])  # Changed def_team → opponent
     
-    df_yards['def_5game_avg_allowed'] = df_yards.groupby('def_team')['passing_yards'].rolling(window=5, min_periods=1).mean().reset_index(level=0, drop=True)
+    # Calculate stats (change def_team → opponent everywhere)
+    df_yards['cumulative_avg'] = df_yards.groupby('opponent')['passing_yards'].expanding().mean().reset_index(level=0, drop=True)
+    df_yards['def_recent_avg_allowed'] = df_yards.groupby('opponent')['passing_yards'].rolling(window=3, min_periods=1).mean().reset_index(level=0, drop=True)
+    df_yards['def_5game_avg_allowed'] = df_yards.groupby('opponent')['passing_yards'].rolling(window=5, min_periods=1).mean().reset_index(level=0, drop=True)
+    df_yards['def_consistency'] = df_yards.groupby('opponent')['passing_yards'].rolling(window=5, min_periods=2).std().reset_index(level=0, drop=True)
     
-    df_yards['def_consistency'] = df_yards.groupby('def_team')['passing_yards'].rolling(window=5, min_periods=2).std().reset_index(level=0, drop=True)
-
-    df_yards['cumulative_avg'] = df_yards.groupby('def_team')['cumulative_avg'].shift(1)
-    df_yards['def_recent_avg_allowed'] = df_yards.groupby('def_team')['def_recent_avg_allowed'].shift(1)
-    df_yards['def_5game_avg_allowed'] = df_yards.groupby('def_team')['def_5game_avg_allowed'].shift(1)
-    df_yards['def_consistency'] = df_yards.groupby('def_team')['def_consistency'].shift(1)
-
+    # Shift
+    df_yards['cumulative_avg'] = df_yards.groupby('opponent')['cumulative_avg'].shift(1)
+    df_yards['def_recent_avg_allowed'] = df_yards.groupby('opponent')['def_recent_avg_allowed'].shift(1)
+    df_yards['def_5game_avg_allowed'] = df_yards.groupby('opponent')['def_5game_avg_allowed'].shift(1)
+    df_yards['def_consistency'] = df_yards.groupby('opponent')['def_consistency'].shift(1)
+    
     df_yards['def_trend'] = df_yards['def_recent_avg_allowed'] - df_yards['cumulative_avg']
-
     
-    defense_stats = df_yards.groupby(['def_team', 'week']).agg({
+    # Aggregate (change def_team → opponent)
+    defense_stats = df_yards.groupby(['opponent', 'week']).agg({
         'cumulative_avg': 'last',
         'def_recent_avg_allowed': 'last',
         'def_5game_avg_allowed': 'last',
         'def_trend': 'last',
-        'def_consistency': 'last',
-        'passing_yards': 'mean'
+        'def_consistency': 'last'
     }).reset_index()
 
     # Fill NaN (Week 1 has no prior data after shift)
@@ -68,8 +65,6 @@ def avg_pass_yards_allow(df):
     for col in defense_cols:
         league_avg = defense_stats[col].mean()
         defense_stats[col] = defense_stats[col].fillna(league_avg)
-    
-    defense_stats = defense_stats.drop(columns=['passing_yards'])
 
     return defense_stats
 

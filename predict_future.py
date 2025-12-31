@@ -5,7 +5,7 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
                                    week, historical_data, num_recent_games=5, game_date=None):
 
     current_player = historical_data[
-        (historical_data['player_name'] == player_name) &
+        (historical_data['player_display_name'] == player_name) &
         (historical_data['team'] == team)
     ]
 

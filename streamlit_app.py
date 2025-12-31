@@ -34,7 +34,7 @@ with st.spinner("Loading model..."):
 
 # Get list of QBs from the original data, filtered for QBs only
 qb_list = sorted([
-    str(name) for name in PlayerStats2025[PlayerStats2025['position'] == 'QB']['player_name'].unique() 
+    str(name) for name in PlayerStats2025[PlayerStats2025['position'] == 'QB']['player_display_name'].unique() 
     if pd.notna(name)
 ])
 col1, col2 = st.columns([2, 1])
@@ -42,7 +42,7 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("Game Setup")
     
-    selected_qb = st.selectbox("Select Quarterback", qb_list, index=qb_list.index('P.Mahomes') if 'P.Mahomes' in qb_list else 0)
+    selected_qb = st.selectbox("Select Quarterback", qb_list, index=qb_list.index('Patrick Mahomes') if 'Patrick Mahomes' in qb_list else 0)
 
     qb_team = PlayerStats2025[PlayerStats2025['player_name'] == selected_qb]['team'].iloc[0]
     

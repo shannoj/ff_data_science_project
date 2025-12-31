@@ -9,8 +9,7 @@ PlayerStats2025 = pd.read_csv("enhanced_stats_2025_3.csv", low_memory=False)
 QbStats2025 = position_cleaning(PlayerStats2025, 'QB')
 QbStats2025_encoded = handle_categoricals(QbStats2025)
 
-print(QbStats2025_encoded.shape)
-print(QbStats2025_encoded.columns)
+QbStats2025.to_csv('QB_stats_2025_3.csv', index=False)
 
 # Train model
 r2, rmse, model, features, X_train, y_train = predict_category_xg('passing_yards', QbStats2025_encoded)
