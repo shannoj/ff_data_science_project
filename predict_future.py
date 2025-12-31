@@ -30,7 +30,7 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
     
     stat_cols = [
         'passing_epa',
-        'passing_cpoe', 'pacr', 'comp_percent', 'avg_time_to_throw','aggressiveness', 'passer_rating','expected_completion_percentage','completion_percentage_above_expectation' 
+        'passing_cpoe', 'pacr', 'comp_percent', 'avg_time_to_throw','aggressiveness', 'passer_rating','expected_completion_percentage','completion_percentage_above_expectation',
     ]
     
     for col in stat_cols:
@@ -39,8 +39,24 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
     
     opponent_games = historical_data[
         (historical_data['team'] == opponent) &
+        (historical_data['week'] < week)]
+
+    opponent_def_history = historical_data[
+        (historical_data['opponent'] == opponent) &  # Games against this opponent
         (historical_data['week'] < week)
-    ]
+    ].sort_values('week')
+
+    if not opponent_def_history.empty:
+
+        # Get the MOST RECENT defense stats (last week's values)
+        latest_def = opponent_def_history.iloc[-1]
+        
+        # Defense stats from the merge
+        template['cumulative_avg'] = latest_def.get('cumulative_avg', 250)
+        template['def_recent_avg_allowed'] = latest_def.get('def_recent_avg_allowed', 250)
+        template['def_5game_avg_allowed'] = latest_def.get('def_5game_avg_allowed', 250)
+        template['def_trend'] = latest_def.get('def_trend', 0)
+        template['def_consistency'] = latest_def.get('def_consistency', 50)
     
     if not opponent_games.empty:
         def_cols = [col for col in opponent_games.columns if col.startswith('def_') and col.endswith('_y')]

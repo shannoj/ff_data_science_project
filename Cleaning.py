@@ -1,13 +1,17 @@
 from sklearn.preprocessing import LabelEncoder
-from features import completion_percent
+from features import completion_percent, avg_pass_yards_allow
 
 def position_cleaning(df, position):
 
     if position == 'QB':
 
+        defense_stats = avg_pass_yards_allow(df)
+
         PlayerStats_QB = df[df['position'] == position].copy()
 
         PlayerStats_QB = completion_percent(PlayerStats_QB)
+
+        PlayerStats_QB = PlayerStats_QB[PlayerStats_QB['passing_yards'] > 0]
 
         drop_empty_cols = [col for col in PlayerStats_QB.columns if (PlayerStats_QB[col] == 0).all()]
 
@@ -23,7 +27,16 @@ def position_cleaning(df, position):
 
         Qb_Stats = PlayerStats_QB_cleaned_2.drop(columns=['carries', 'passing_2pt_conversions', 'completions', 'attempts', 'passing_tds','passing_interceptions','sacks_suffered','sack_yards_lost','sack_fumbles','sack_fumbles_lost','passing_air_yards','passing_yards_after_catch','passing_first_downs','player_id','receiving_tds','player_display_name','season','season_type','position_group','player_name','position','fantasy_points','racr','wopr','headshot_url','receptions', 'targets','receiving_yards','receiving_air_yards','receiving_yards_after_catch','receiving_first_downs','receiving_epa', 'target_share','air_yards_share'])
 
-        return Qb_Stats
+        QbStats_enhanced = Qb_Stats.merge(
+                defense_stats,
+                left_on=['opponent', 'week'],
+                right_on=['def_team', 'week'],
+                how='left'
+            ).drop(columns=['def_team'])
+        
+        #QbStats_enhanced = QbStats_enhanced.drop(columns=['passing_yards_y'])
+
+        return QbStats_enhanced
     
     elif position == 'WR':
 
