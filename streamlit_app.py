@@ -30,7 +30,7 @@ def load_model():
 
 with st.spinner("Loading model..."):
     PlayerStats2025, QbStats2025 = load_data()
-    yards_model, model_features, X_train, y_train, r2, rmse = load_model()
+    yards_model, model_features, r2, rmse = load_model()
 
 # Get list of QBs from the original data, filtered for QBs only
 qb_list = sorted([
@@ -64,7 +64,6 @@ with col2:
     st.subheader("Be wary of results if the player did not play in any games within the average window selected")
     num_games = st.slider("Recent games to average", 3, 12, 5)
     show_confidence = st.checkbox("Show confidence intervals", value=True)
-    run_bootstrap = st.checkbox("Run bootstrap (slower)", value=False)
 
 st.markdown("---")
 game_date = st.date_input("Game Date", value=datetime(2025, 1, 5))
@@ -101,19 +100,6 @@ if st.button("Generate Prediction", type="primary"):
                 delta=f"±{rmse:.0f} (model RMSE)"
             )
         
-        if show_confidence and run_bootstrap:
-            with st.spinner("Calculating confidence intervals..."):
-                lower, median, upper = bootstrap_predictions(
-                    yards_model, X_train, y_train, X_pred, n_iterations=100
-                )
-                
-                with col_result2:
-                    st.metric("80% CI Lower", f"{lower:.0f}")
-                with col_result3:
-                    st.metric("80% CI Upper", f"{upper:.0f}")
-                
-                st.info(f"There's an 80% chance {selected_qb} throws between **{lower:.0f}** and **{upper:.0f}** yards")
-        elif show_confidence:
             lower_rmse = pred_yards - 1.28 * rmse
             upper_rmse = pred_yards + 1.28 * rmse
             
@@ -141,7 +127,7 @@ st.markdown("---")
 st.markdown("""
 **About this model:**
 - Trained on NFL games from 2025 season
-- Uses XGBoost with 35 engineered features
+- Uses XGBoost with 42 engineered features
 - Incorporates recent performance, opponent strength, weather, and game context
-- Model performance: R²=0.81
+- Model performance: R²=0.685
 """)
