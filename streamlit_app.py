@@ -44,7 +44,7 @@ with col1:
     
     selected_qb = st.selectbox("Select Quarterback", qb_list, index=qb_list.index('Patrick Mahomes') if 'Patrick Mahomes' in qb_list else 0)
 
-    qb_team = PlayerStats2025[PlayerStats2025['player_name'] == selected_qb]['team'].iloc[0]
+    qb_team = PlayerStats2025[PlayerStats2025['player_display_name'] == selected_qb]['team'].iloc[0]
     
     col1a, col1b, col1c = st.columns(3)
     
@@ -129,5 +129,5 @@ st.markdown("""
 - Trained on NFL games from 2025 season
 - Uses XGBoost with 42 engineered features
 - Incorporates recent performance, opponent strength, weather, and game context
-- Model performance: R²=0.685
+- Model performance: R²=0.602
 """)
