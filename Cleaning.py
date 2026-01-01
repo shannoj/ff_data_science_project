@@ -33,7 +33,7 @@ def position_cleaning(df, position):
                 how='left'
             )
         
-        QbStats_enhanced = QbStats_enhanced.drop(columns=['team', 'opponent', 'week'])
+        QbStats_enhanced = QbStats_enhanced.drop(columns=['opponent', 'week'])
 
         return QbStats_enhanced
     
