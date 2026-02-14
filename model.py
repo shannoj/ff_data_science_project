@@ -58,7 +58,7 @@ def predict_category(stat, df, estimators):
 
     return r2, rmse, model, model_features
 
-def predict_category_xg(stat, df):
+def predict_category_xg(stat, df, learning_rate_, alpha, _lambda):
 
     y = df[stat]
 
@@ -73,9 +73,11 @@ def predict_category_xg(stat, df):
     )
 
     model = XGBRegressor(
+        reg_alpha = alpha,
+        reg_lambda = _lambda,
         n_estimators=200,
-        learning_rate=0.05,
-        max_depth=6,
+        learning_rate=learning_rate_,
+        max_depth=4,
         subsample=0.8,
         colsample_bytree=0.8,
         random_state=42
@@ -84,10 +86,14 @@ def predict_category_xg(stat, df):
     model.fit(X_train, y_train)
 
     predictions = model.predict(X_test)
+    train_predictions = model.predict(X_train)
 
     r2 = r2_score(y_test, predictions)
+
+    r2_train = r2_score(y_train, train_predictions)
+
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
 
     model_features = X.columns.tolist()
 
-    return r2, rmse, model, model_features, X_train, y_train
+    return r2, r2_train, rmse, model, model_features, X_train, y_train

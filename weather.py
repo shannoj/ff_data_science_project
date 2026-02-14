@@ -122,12 +122,12 @@ def get_game_weather_forecast(team, is_home, opponent, game_datetime=None):
         
         lat, lon = result
         
-        # If no game datetime provided, use next Sunday at 1 PM
+        # If no game datetime provided, next Sunday at 1 PM
         if game_datetime is None:
             today = datetime.now()
             days_until_sunday = (6 - today.weekday()) % 7
             if days_until_sunday == 0:
-                days_until_sunday = 7  # Next Sunday, not today
+                days_until_sunday = 7  
             game_datetime = today + timedelta(days=days_until_sunday)
             game_datetime = game_datetime.replace(hour=13, minute=0, second=0, microsecond=0)
         
@@ -172,7 +172,6 @@ def update_stadium_forecasts():
             else:
                 print("Failed")
             
-            # Be nice to the API - small delay between requests
             time.sleep(0.5)
         
         conn.commit()
@@ -221,15 +220,11 @@ def update_stadium_forecasts_for_week(week_number, year=2025):
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
         
-        # You'll need a table with game schedules
-        # For now, let's just update current weather for all stadiums
         cursor.execute("SELECT team, latitude, longitude FROM stadium_locations")
         stadiums = cursor.fetchall()
         
         print(f"Fetching weather forecasts for Week {week_number}...")
-        
-        # This is simplified - you'd want to get actual game dates/times from schedule
-        # For now, assume games are on Sunday at 1 PM
+
         today = datetime.now()
         days_until_sunday = (6 - today.weekday()) % 7
         game_date = today + timedelta(days=days_until_sunday)

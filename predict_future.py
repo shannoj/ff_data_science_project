@@ -48,7 +48,7 @@ def create_qb_prediction_features(player_name, team, opponent, is_home,
 
     if not opponent_def_history.empty:
 
-        # Get the MOST RECENT defense stats (last week's values)
+        # Get the MOST RECENT defense stats
         latest_def = opponent_def_history.iloc[-1]
         
         # Defense stats from the merge
