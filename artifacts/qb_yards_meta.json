@@ -1,0 +1,102 @@
+{
+  "features": [
+    "qb_ypg_3",
+    "qb_ypg_8",
+    "qb_ypg_ewm",
+    "qb_ypg_season",
+    "qb_att_8",
+    "qb_ypa_8",
+    "qb_air_ypa_8",
+    "qb_epa_db_8",
+    "qb_cpoe_8",
+    "qb_sack_rate_8",
+    "qb_int_rate_8",
+    "qb_games_prior",
+    "def_ypg_5",
+    "def_ypg_ewm",
+    "def_ypa_10",
+    "def_epa_db_10",
+    "def_sack_rate_10",
+    "def_int_rate_10",
+    "is_home",
+    "spread",
+    "total_line",
+    "implied_total",
+    "roof_type",
+    "turf",
+    "temp",
+    "wind",
+    "div_game",
+    "rest",
+    "week",
+    "postseason"
+  ],
+  "params": {
+    "learning_rate": 0.03,
+    "max_depth": 3,
+    "min_child_weight": 10,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "random_state": 42
+  },
+  "n_trees": 404,
+  "trained_at": "2026-11-14T18:10:26+00:00",
+  "trained_through": {
+    "season": 2026,
+    "week": 10
+  },
+  "split": {
+    "train": "2020-2024",
+    "valid": 2025,
+    "test": "2026+"
+  },
+  "test_metrics": {
+    "mae": 55.86784744262695,
+    "rmse": 70.26532445176996,
+    "r2": 0.09093564748764038,
+    "n": 278
+  },
+  "baseline_metrics": {
+    "mae": 57.94663568046661,
+    "rmse": 72.97461602951725,
+    "r2": 0.01948071629834902,
+    "n": 278
+  },
+  "interval": {
+    "low": -95.25061645507812,
+    "high": 82.1878143310547
+  },
+  "importance": {
+    "qb_ypg_ewm": 0.14225518703460693,
+    "qb_ypg_8": 0.1215352714061737,
+    "implied_total": 0.06334907561540604,
+    "qb_ypg_season": 0.04334653541445732,
+    "total_line": 0.03820021077990532,
+    "qb_epa_db_8": 0.036518123000860214,
+    "week": 0.035115934908390045,
+    "wind": 0.03075275383889675,
+    "qb_att_8": 0.028523268178105354,
+    "qb_int_rate_8": 0.02849336341023445,
+    "def_ypg_5": 0.028048571199178696,
+    "qb_cpoe_8": 0.027973821386694908,
+    "temp": 0.025296637788414955,
+    "def_ypa_10": 0.02523397095501423,
+    "def_int_rate_10": 0.02498643845319748,
+    "def_ypg_ewm": 0.023043308407068253,
+    "roof_type": 0.022076521068811417,
+    "qb_sack_rate_8": 0.02166678197681904,
+    "is_home": 0.02163034677505493,
+    "qb_games_prior": 0.021602189168334007,
+    "spread": 0.021386705338954926,
+    "def_epa_db_10": 0.02119564078748226,
+    "qb_ypa_8": 0.021144263446331024,
+    "qb_ypg_3": 0.02097916044294834,
+    "def_sack_rate_10": 0.020353203639388084,
+    "qb_air_ypa_8": 0.019864028319716454,
+    "rest": 0.017872178927063942,
+    "turf": 0.016124160960316658,
+    "div_game": 0.015824250876903534,
+    "postseason": 0.015608115121722221
+  }
+}
