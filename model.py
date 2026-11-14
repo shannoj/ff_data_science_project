@@ -1,93 +1,120 @@
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
+"""Train, evaluate, save and load the QB passing-yards model."""
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from xgboost import XGBRegressor
-from lightgbm import LGBMRegressor
-from sklearn.utils import resample
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from xgboost import Booster, XGBRegressor
 
-def bootstrap_predictions(model, X_train, y_train, X_pred, n_iterations=100):
-    predictions = []
-    
-    for i in range(n_iterations):
-        X_boot, y_boot = resample(X_train, y_train, random_state=i)
-        
-        model.fit(X_boot, y_boot)
+from features import FEATURES, TARGET
 
-        pred = model.predict(X_pred)
-        predictions.append(pred[0])
-    
-    predictions = np.array(predictions)
-    
-    lower = np.percentile(predictions, 10)
-    median = np.percentile(predictions, 50)
-    upper = np.percentile(predictions, 90)
-    
-    return lower, median, upper
+ARTIFACT_DIR = Path(__file__).parent / "artifacts"
+MODEL_PATH = ARTIFACT_DIR / "qb_yards_model.json"
+META_PATH = ARTIFACT_DIR / "qb_yards_meta.json"
 
-def predict_category(stat, df, estimators):
+# Shallow trees, a slow learning rate, and early stopping on a held-out season.
+# The tree count comes from early stopping, so there is nothing to sweep by hand.
+PARAMS = dict(
+    learning_rate=0.03,
+    max_depth=3,
+    min_child_weight=10,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    reg_lambda=1.0,
+    random_state=42,
+)
+MAX_TREES = 2000
+EARLY_STOPPING = 100
+INTERVAL = (0.10, 0.90)  # 80% projection range
 
-    y = df[stat]
 
-    X = df
+def _metrics(y, pred):
+    return {
+        "mae": float(mean_absolute_error(y, pred)),
+        "rmse": float(np.sqrt(mean_squared_error(y, pred))),
+        "r2": float(r2_score(y, pred)),
+        "n": int(len(y)),
+    }
 
-    targets_to_drop = [stat]
 
-    X = df.drop(columns=[col for col in targets_to_drop if col in df.columns], errors='ignore')
+def labeled_rows(dataset):
+    return dataset[dataset["completed"].astype(bool) & dataset[TARGET].notna()]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=1
-    )
 
-    model = RandomForestRegressor(
-        n_estimators=estimators,      
-        max_depth=4,          
-        random_state=42,      
-        verbose=0,            
-        n_jobs=-1            
-    )
+def train(dataset):
+    """Evaluate on a time-based split, then refit on every completed game.
 
-    model.fit(X_train, y_train)
+    Train: all seasons before the validation season.
+    Valid: the previous season, used for early stopping.
+    Test:  the current season so far, never seen while choosing the tree count.
+    """
+    data = labeled_rows(dataset)
+    seasons = sorted(data["season"].unique())
+    test_season = seasons[-1]
+    if (data["season"] == test_season).sum() < 100:  # too early in the season to test on
+        test_season = seasons[-2]
+    valid_season = test_season - 1
 
-    predictions = model.predict(X_test)
+    tr = data[data["season"] < valid_season]
+    va = data[data["season"] == valid_season]
+    te = data[data["season"] >= test_season]
 
-    r2 = r2_score(y_test, predictions)
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+    model = XGBRegressor(n_estimators=MAX_TREES, early_stopping_rounds=EARLY_STOPPING, **PARAMS)
+    model.fit(tr[FEATURES], tr[TARGET], eval_set=[(va[FEATURES], va[TARGET])], verbose=False)
+    n_trees = model.best_iteration + 1
 
-    model_features = X.columns.tolist()
+    test_pred = model.predict(te[FEATURES])
+    baseline = te["qb_ypg_8"].fillna(tr[TARGET].mean())
+    holdout = np.concatenate([va[TARGET] - model.predict(va[FEATURES]), te[TARGET] - test_pred])
 
-    return r2, rmse, model, model_features
+    # Final model: all completed games, a few more trees for the extra data.
+    final = XGBRegressor(n_estimators=int(n_trees * 1.1), **PARAMS)
+    final.fit(data[FEATURES], data[TARGET], verbose=False)
 
-def predict_category_xg(stat, df):
+    last = data.sort_values(["season", "week"]).iloc[-1]
+    importance = dict(zip(FEATURES, final.feature_importances_.astype(float)))
+    meta = {
+        "features": FEATURES,
+        "params": PARAMS,
+        "n_trees": int(final.n_estimators),
+        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "trained_through": {"season": int(last["season"]), "week": int(last["week"])},
+        "split": {
+            "train": f"{int(tr['season'].min())}-{int(tr['season'].max())}",
+            "valid": int(valid_season),
+            "test": f"{int(test_season)}+",
+        },
+        "test_metrics": _metrics(te[TARGET], test_pred),
+        "baseline_metrics": _metrics(te[TARGET], baseline),
+        "interval": {"low": float(np.quantile(holdout, INTERVAL[0])),
+                     "high": float(np.quantile(holdout, INTERVAL[1]))},
+        "importance": dict(sorted(importance.items(), key=lambda kv: -kv[1])),
+    }
+    return final, meta
 
-    y = df[stat]
 
-    X = df
+def _booster(model):
+    return model.get_booster() if isinstance(model, XGBRegressor) else model
 
-    targets_to_drop = [stat]
 
-    X = df.drop(columns=[col for col in targets_to_drop if col in df.columns], errors='ignore')
+def save(model, meta):
+    # Save the raw booster: XGBRegressor.save_model breaks under scikit-learn 1.8.
+    ARTIFACT_DIR.mkdir(exist_ok=True)
+    _booster(model).save_model(MODEL_PATH)
+    META_PATH.write_text(json.dumps(meta, indent=2))
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=1
-    )
 
-    model = XGBRegressor(
-        n_estimators=200,
-        learning_rate=0.05,
-        max_depth=6,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
-    )
+def load():
+    booster = Booster()
+    booster.load_model(MODEL_PATH)
+    return booster, json.loads(META_PATH.read_text())
 
-    model.fit(X_train, y_train)
 
-    predictions = model.predict(X_test)
-
-    r2 = r2_score(y_test, predictions)
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
-
-    model_features = X.columns.tolist()
-
-    return r2, rmse, model, model_features, X_train, y_train
+def predict(model, meta, rows):
+    """Add `projection`, `low` and `high` (80% range) columns."""
+    out = rows.copy()
+    out["projection"] = _booster(model).inplace_predict(out[meta["features"]].astype(float))
+    out["low"] = (out["projection"] + meta["interval"]["low"]).clip(lower=0)
+    out["high"] = out["projection"] + meta["interval"]["high"]
+    return out

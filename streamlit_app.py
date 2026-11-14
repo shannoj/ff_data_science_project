@@ -1,133 +1,146 @@
-import streamlit as st
+from pathlib import Path
+
 import pandas as pd
-from datetime import datetime, timedelta
-from Cleaning import position_cleaning, handle_categoricals
-from model import predict_category_xg, bootstrap_predictions
-from predict_future import create_qb_prediction_features
-import joblib
+import streamlit as st
 
-st.set_page_config(
-    page_title="NFL QB Yards Predictor",
-    layout="wide"
-)
+import model as qb_model
+from data import load_all, next_week
+from pipeline import PREDICTIONS_DIR, project_week
 
-st.title("NFL Quarterback Yards Predictor")
-st.markdown("Predicting passing yards using machine learning and game context")
+st.set_page_config(page_title="NFL QB Passing Yards", layout="wide")
 
-@st.cache_data
-def load_data():
-    PlayerStats2025 = pd.read_csv("enhanced_stats_2025_3.csv", low_memory=False)
-    QbStats2025 = position_cleaning(PlayerStats2025, 'QB')
-    return PlayerStats2025, QbStats2025
 
 @st.cache_resource
-def load_model():
-    """Load pre-trained model instead of training from scratch"""
-    model = joblib.load('qb_yards_model.pkl')
-    features = joblib.load('model_features.pkl')
-    metrics = joblib.load('model_metrics.pkl')
-    return model, features, metrics['r2'], metrics['rmse']
+def get_model():
+    return qb_model.load()
 
-with st.spinner("Loading model..."):
-    PlayerStats2025, QbStats2025 = load_data()
-    yards_model, model_features, r2, rmse = load_model()
 
-# Get list of QBs from the original data, filtered for QBs only
-qb_list = sorted([
-    str(name) for name in PlayerStats2025[PlayerStats2025['position'] == 'QB']['player_display_name'].unique() 
-    if pd.notna(name)
-])
-col1, col2 = st.columns([2, 1])
+@st.cache_data(ttl=3 * 3600, show_spinner="Pulling the latest NFL data...")
+def get_data():
+    return load_all()
 
-with col1:
-    st.subheader("Game Setup")
-    
-    selected_qb = st.selectbox("Select Quarterback", qb_list, index=qb_list.index('Patrick Mahomes') if 'Patrick Mahomes' in qb_list else 0)
 
-    qb_team = PlayerStats2025[PlayerStats2025['player_display_name'] == selected_qb]['team'].iloc[0]
-    
-    col1a, col1b, col1c = st.columns(3)
-    
-    with col1a:
-        teams = sorted(QbStats2025['team'].unique())
-        opponent = st.selectbox("Opponent", [t for t in teams if t != qb_team])
-    
-    with col1b:
-        is_home = st.radio("Location", ["Home", "Away"], horizontal=True)
-        is_home_val = 1 if is_home == "Home" else 0
-    
-    with col1c:
-        week = st.number_input("Week", min_value=1, max_value=18, value=18)
+@st.cache_data(ttl=3 * 3600, show_spinner="Projecting this week's games...")
+def get_projections(season, week):
+    player_stats, schedule = get_data()
+    model, meta = get_model()
+    return project_week(player_stats, schedule, model, meta, season, week)
 
-with col2:
-    st.subheader("Advanced Options")
-    st.subheader("Be wary of results if the player did not play in any games within the average window selected")
-    num_games = st.slider("Recent games to average", 3, 12, 5)
-    show_confidence = st.checkbox("Show confidence intervals", value=True)
 
-st.markdown("---")
-game_date = st.date_input("Game Date", value=datetime(2025, 1, 5))
-game_time = st.time_input("Game Time", value=datetime.strptime("13:00", "%H:%M").time())
-game_datetime = datetime.combine(game_date, game_time)
+@st.cache_data(ttl=3 * 3600)
+def get_track_record():
+    """Saved weekly predictions joined to what actually happened."""
+    files = sorted(Path(PREDICTIONS_DIR).glob("*.csv"))
+    if not files:
+        return pd.DataFrame()
+    preds = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    player_stats, _ = get_data()
+    actual = player_stats[["player_id", "game_id", "passing_yards"]]
+    return preds.merge(actual, on=["player_id", "game_id"], how="inner")
 
-if st.button("Generate Prediction", type="primary"):
-    with st.spinner("Generating prediction..."):
-        
-        qb_predictions = create_qb_prediction_features(
-            selected_qb, 
-            qb_team, 
-            opponent, 
-            is_home_val, 
-            week, 
-            PlayerStats2025, 
-            num_recent_games=num_games,
-            game_date=game_datetime
+
+model, meta = get_model()
+player_stats, schedule = get_data()
+target = next_week(schedule)
+
+st.title("NFL Quarterback Passing Yards")
+st.caption("Weekly projections from an XGBoost model on nflverse data, Vegas lines and kickoff weather.")
+
+tab_week, tab_record, tab_model = st.tabs(["This week", "Track record", "About the model"])
+
+with tab_week:
+    if target is None:
+        st.info("No unplayed games left this season.")
+    else:
+        season, week = target
+        proj = get_projections(season, week)
+        st.subheader(f"{season} Week {week}")
+
+        table = pd.DataFrame({
+            "QB": proj["player_display_name"],
+            "Team": proj["team"],
+            "Matchup": proj.apply(lambda r: ("vs " if r["is_home"] else "@ ") + r["opponent"], axis=1),
+            "Kickoff": pd.to_datetime(proj["gameday"] + " " + proj["gametime"]).dt.strftime("%a %b %d %-I:%M %p"),
+            "Spread": proj["spread"],
+            "Team total": proj["implied_total"],
+            "Projection": proj["projection"].round(0),
+            "80% range": proj.apply(lambda r: f"{r['low']:.0f}–{r['high']:.0f}", axis=1),
+        })
+        st.dataframe(
+            table, hide_index=True, width="stretch",
+            column_config={
+                "Spread": st.column_config.NumberColumn(format="%+.1f", help="Positive = team favored"),
+                "Team total": st.column_config.NumberColumn(format="%.1f", help="Vegas implied points"),
+                "Projection": st.column_config.ProgressColumn(
+                    format="%d yds", min_value=0, max_value=float(proj["high"].max())),
+            },
         )
-        
-        features_encoded = handle_categoricals(qb_predictions)
-        X_pred = features_encoded[model_features]
-        pred_yards = yards_model.predict(X_pred)[0]
-        
-        st.markdown("---")
-        st.subheader("Prediction Results")
-        
-        col_result1, col_result2, col_result3 = st.columns(3)
-        
-        with col_result1:
-            st.metric(
-                label=f"{selected_qb} Projected Yards",
-                value=f"{pred_yards:.0f}",
-                delta=f"±{rmse:.0f} (model RMSE)"
-            )
-        
-            lower_rmse = pred_yards - 1.28 * rmse
-            upper_rmse = pred_yards + 1.28 * rmse
-            
-            with col_result2:
-                st.metric("80% CI Lower", f"{lower_rmse:.0f}")
-            with col_result3:
-                st.metric("80% CI Upper", f"{upper_rmse:.0f}")
-            
-            st.info(f"There's an 80% chance {selected_qb} throws between **{lower_rmse:.0f}** and **{upper_rmse:.0f}** yards")
-        
-        with st.expander("View Key Features"):
-            feature_df = pd.DataFrame({
-                'Feature': ['Passer Rating', 'Passing EPA', 'Home/Away', 'Opponent', 'Weather'],
-                'Value': [
-                    f"{qb_predictions['passer_rating'].iloc[0]:.0f}" if 'passer_rating' in qb_predictions else 'N/A',
-                    f"{qb_predictions['passing_epa'].iloc[0]:.2%}" if 'passing_epa' in qb_predictions else 'N/A',
-                    is_home,
-                    opponent,
-                    f"{qb_predictions['temp'].iloc[0]:.0f}°F" if 'temp' in qb_predictions else 'N/A'
-                ]
-            })
-            st.dataframe(feature_df, hide_index=True)
+        st.caption("Starters come from the nflverse schedule and fall back to each team's most recent starter. "
+                   "Weather is the Open-Meteo forecast at kickoff for outdoor stadiums.")
 
-st.markdown("---")
-st.markdown("""
-**About this model:**
-- Trained on NFL games from 2025 season
-- Uses XGBoost with 42 engineered features
-- Incorporates recent performance, opponent strength, weather, and game context
-- Model performance: R²=0.602
-""")
+        st.markdown("#### Why this projection?")
+        qb = st.selectbox("Quarterback", proj["player_display_name"])
+        r = proj[proj["player_display_name"] == qb].iloc[0]
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**Recent form**")
+            st.metric("Yards/game, last 3", f"{r['qb_ypg_3']:.0f}" if pd.notna(r["qb_ypg_3"]) else "—")
+            st.metric("Yards/game, last 8", f"{r['qb_ypg_8']:.0f}" if pd.notna(r["qb_ypg_8"]) else "—")
+            st.metric("EPA/dropback, last 8", f"{r['qb_epa_db_8']:+.2f}" if pd.notna(r["qb_epa_db_8"]) else "—")
+        with c2:
+            st.markdown(f"**{r['opponent']} pass defense**")
+            st.metric("Yards allowed/game, last 5", f"{r['def_ypg_5']:.0f}" if pd.notna(r["def_ypg_5"]) else "—")
+            st.metric("Yards/attempt allowed, last 10", f"{r['def_ypa_10']:.2f}" if pd.notna(r["def_ypa_10"]) else "—")
+            st.metric("Sack rate, last 10", f"{r['def_sack_rate_10']:.1%}" if pd.notna(r["def_sack_rate_10"]) else "—")
+        with c3:
+            st.markdown("**Game context**")
+            st.metric("Vegas team total", f"{r['implied_total']:.1f}" if pd.notna(r["implied_total"]) else "—")
+            venue = {0.0: "Outdoors", 0.5: "Retractable roof", 1.0: "Dome"}.get(r["roof_type"], "—")
+            weather = f"{r['temp']:.0f}°F, {r['wind']:.0f} mph wind" if pd.notna(r["temp"]) and r["roof_type"] == 0 else venue
+            st.metric("Conditions", weather)
+            st.metric("Projection", f"{r['projection']:.0f} yds", help=f"80% range {r['low']:.0f}–{r['high']:.0f}")
+        if r["qb_games_prior"] < 3:
+            st.warning(f"{qb} has only {int(r['qb_games_prior'])} prior starts in the data, so this projection is shaky.")
+
+with tab_record:
+    record = get_track_record()
+    if record.empty:
+        st.info("No graded predictions yet. Each run of `python pipeline.py` saves that week's "
+                "projections, and they're graded here once the games are played.")
+    else:
+        record["error"] = record["passing_yards"] - record["projection"]
+        record["in_range"] = record["passing_yards"].between(record["low"], record["high"])
+        weekly = record.groupby(["season", "week"]).agg(
+            games=("error", "size"),
+            mae=("error", lambda e: e.abs().mean()),
+            bias=("error", "mean"),
+            in_range=("in_range", "mean"),
+        ).reset_index()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Graded projections", len(record))
+        c2.metric("Average miss (MAE)", f"{record['error'].abs().mean():.1f} yds")
+        c3.metric("Inside 80% range", f"{record['in_range'].mean():.0%}")
+        st.dataframe(weekly, hide_index=True, width="stretch", column_config={
+            "mae": st.column_config.NumberColumn("MAE", format="%.1f"),
+            "bias": st.column_config.NumberColumn("Bias (actual − proj)", format="%+.1f"),
+            "in_range": st.column_config.NumberColumn("In 80% range", format="percent"),
+        })
+        st.dataframe(record[["season", "week", "player_display_name", "team", "opponent",
+                             "projection", "low", "high", "passing_yards", "error"]].round(1),
+                     hide_index=True, width="stretch")
+
+with tab_model:
+    t, b = meta["test_metrics"], meta["baseline_metrics"]
+    tt = meta["trained_through"]
+    st.markdown(f"Trained through **{tt['season']} week {tt['week']}** on {meta['n_trees']} trees "
+                f"(train {meta['split']['train']}, early-stopped on {meta['split']['valid']}).")
+    st.markdown(f"**Out-of-sample test, {meta['split']['test']} season ({t['n']} QB games)**")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("MAE", f"{t['mae']:.1f} yds", f"{t['mae'] - b['mae']:+.1f} vs 8-game average", delta_color="inverse")
+    c2.metric("RMSE", f"{t['rmse']:.1f} yds", f"{t['rmse'] - b['rmse']:+.1f} vs 8-game average", delta_color="inverse")
+    c3.metric("R²", f"{t['r2']:.3f}", f"{t['r2'] - b['r2']:+.3f} vs 8-game average")
+    st.markdown("Single-game passing yards are very noisy, so even good models have a typical miss of 50+ yards. "
+                "Every feature is computed only from information available before kickoff.")
+    st.markdown("**What the model leans on**")
+    imp = pd.Series(meta["importance"]).head(15).sort_values()
+    st.bar_chart(imp, horizontal=True)
