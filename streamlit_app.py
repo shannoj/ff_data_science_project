@@ -136,16 +136,18 @@ with tab_record:
 with tab_model:
     t, b = meta["test_metrics"], meta["baseline_metrics"]
     tt = meta["trained_through"]
-    st.markdown(f"Trained through **{tt['season']} week {tt['week']}** on {meta['n_trees']} trees "
-                f"(train {meta['split']['train']}, early-stopped on {meta['split']['valid']}).")
-    st.markdown(f"**Out-of-sample test, {meta['split']['test']} season ({t['n']} QB games)**")
+    st.markdown(f"The model is the **{meta.get('model_type', 'XGBoost')}**. The live version is trained on "
+                f"**every completed game from 2020 through {tt['season']} week {tt['week']}** and retrained each Tuesday.")
+    st.markdown(f"To score it honestly, a separate copy is trained on {meta['split']['train']}, tuned on "
+                f"{meta['split']['valid']}, and tested on {meta['split']['test']}, which it never saw:")
+    st.markdown(f"**Test results, {meta['split']['test']} season ({t['n']} QB games)**")
     c1, c2, c3 = st.columns(3)
     c1.metric("MAE", f"{t['mae']:.1f} yds", f"{t['mae'] - b['mae']:+.1f} vs 8-game average", delta_color="inverse")
     c2.metric("RMSE", f"{t['rmse']:.1f} yds", f"{t['rmse'] - b['rmse']:+.1f} vs 8-game average", delta_color="inverse")
     c3.metric("R²", f"{t['r2']:.3f}", f"{t['r2'] - b['r2']:+.3f} vs 8-game average")
     st.markdown("Single-game passing yards are very noisy, so even good models have a typical miss of 50+ yards. "
                 "Every feature is computed only from information available before kickoff.")
-    st.markdown("**What the model leans on**")
+    st.markdown("**What the tree model leans on** (XGBoost part)")
     imp = pd.Series(meta["importance"]).head(15).sort_values()
     st.bar_chart(imp, horizontal=True)
 
