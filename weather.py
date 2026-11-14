@@ -1,4 +1,5 @@
 """Kickoff weather forecasts from Open-Meteo for upcoming outdoor games."""
+import time
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -37,8 +38,15 @@ def kickoff_forecast(stadium_team, gameday, gametime):
         "start_date": gameday, "end_date": gameday,
     }
     try:
-        resp = requests.get(FORECAST_URL, params=params, timeout=10)
-        resp.raise_for_status()
+        for attempt in range(3):  # Open-Meteo occasionally times out from CI runners
+            try:
+                resp = requests.get(FORECAST_URL, params=params, timeout=20)
+                resp.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
         hourly = resp.json()["hourly"]
         hour = datetime.strptime(gametime or "13:00", "%H:%M").hour
         idx = hourly["time"].index(f"{gameday}T{hour:02d}:00")
