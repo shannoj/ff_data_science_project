@@ -274,6 +274,27 @@ with tab_exp:
         level, message = autobet.verdict(res)
         getattr(st, level)(message)
 
+        st.markdown("#### Closing line value (CLV)")
+        st.caption("How far the line moved toward each bet between placing it and kickoff. Sharp bettors "
+                   "consistently get better numbers than the close; this shows an edge after ~100 bets, "
+                   "long before profit does. Uses all bets, settled or not.")
+        clv = autobet.closing_value(exp_log, autobet.load_closing())
+        cs = autobet.clv_summary(clv)
+        if cs["n"] == 0:
+            st.info("No closing lines captured yet. They're recorded automatically shortly before each kickoff.")
+        else:
+            v1, v2, v3 = st.columns(3)
+            v1.metric("Average CLV", f"{cs['mean']:+.1f} yds",
+                      f"± {cs['ci95']:.1f} (95%)" if cs["n"] > 1 else None, delta_color="off")
+            v2.metric("Beat the closing line", f"{cs['beat_pct']:.0%}",
+                      f"{cs['same_pct']:.0%} same, {cs['worse_pct']:.0%} worse", delta_color="off")
+            v3.metric("Bets with a closing line", cs["n"])
+            if cs["n"] >= 50 and cs["mean"] - cs["ci95"] > 0:
+                st.success("Bets are consistently beating the closing line: a strong sign of a real edge.")
+            elif cs["n"] >= 50 and cs["mean"] + cs["ci95"] < 0:
+                st.error("The market consistently moves against these bets: the books know something the model doesn't.")
+
+
         if not strat.empty:
             st.markdown("#### Strategies on the same lines")
             st.caption("The model rule is the real test. Controls show what blind betting would have done; "
@@ -318,8 +339,8 @@ with tab_exp:
         st.markdown("#### Bet log")
         log_view = graded.sort_values("commence_time", ascending=False)
         st.dataframe(
-            log_view[["week", "qb", "opponent", "book", "line", "over_odds", "under_odds", "projection",
-                      "p_over", "side", "odds", "actual"]],
+            log_view[["week", "qb", "opponent", "book", "line", "over_odds", "under_odds", "n_books",
+                      "consensus_line", "projection", "p_over", "side", "odds", "actual"]],
             hide_index=True, width="stretch",
             column_config={"p_over": st.column_config.NumberColumn("Model P(over)", format="percent")},
         )

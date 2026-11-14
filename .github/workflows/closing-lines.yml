@@ -1,0 +1,51 @@
+name: Closing lines
+
+# Snapshot sportsbook lines shortly before kickoff for every QB the daily job
+# logged, to measure closing line value. Runs at :35 past the hour through
+# NFL game windows (UTC); each run only calls the Odds API if a logged game
+# kicks off within the next 70 minutes, so idle runs cost nothing.
+on:
+  schedule:
+    - cron: "35 12-23 * * 0"     # Sunday 12:35-23:35 UTC: international, 1pm, 4pm, SNF (EDT)
+    - cron: "35 0 * * 1,2,5,0"   # 00:35 UTC: SNF/MNF/TNF/Saturday night (EST)
+    - cron: "35 23 * * 1,4"      # 23:35 UTC Mon/Thu: MNF/TNF (EDT)
+    - cron: "35 16-23 * * 4,6"   # Thursday (Thanksgiving) and Saturday (late season) day games
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: closing-lines
+  cancel-in-progress: false
+
+jobs:
+  closing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Capture closing lines
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python autobet.py --closing
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add experiment
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Closing lines: $(date -u +%Y-%m-%dT%H:%M)"
+            git pull --rebase
+            git push
+          fi

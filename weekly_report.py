@@ -111,6 +111,11 @@ def build_report():
             "win_rate": "Win rate", "breakeven": "Break-even", "profit": "Profit", "roi": "ROI", "p_luck": "Chance it's luck"}),
             {"Win rate": "{:.1%}".format, "Break-even": "{:.1%}".format, "Profit": "${:+,.0f}".format,
              "ROI": "{:+.1%}".format, "Chance it's luck": "{:.0%}".format}))
+        cs = autobet.clv_summary(autobet.closing_value(log, autobet.load_closing()))
+        if cs["n"]:
+            lines += ["", f"**Closing line value** ({cs['n']} bets): the line moved **{cs['mean']:+.1f} yds** "
+                      f"toward the bets on average (± {cs['ci95']:.1f}), beating the close {cs['beat_pct']:.0%} "
+                      f"of the time. Positive and growing is the best early sign of a real edge."]
         acc = res["accuracy"]
         lines += ["", f"**Model vs. sportsbook line** ({acc['n']} settled lines): the model's projection missed by "
                   f"{acc['model_mae']:.1f} yds on average vs. {acc['line_mae']:.1f} for the line, and was closer "
