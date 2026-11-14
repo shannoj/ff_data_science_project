@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 import autobet
+import kalshi
 import model as qb_model
 from bets import payout_multiple
 from data import load_all, next_week
@@ -125,6 +126,17 @@ def build_report():
             "bucket": "Model chance", "lines": "Lines", "model_said": "Model said", "actually_hit": "Actually hit"}),
             {"Model said": "{:.0%}".format, "Actually hit": "{:.0%}".format}))
         lines.append("")
+
+    kg = kalshi.grade(kalshi.load_log(), player_stats, schedule)
+    if not kg.empty:
+        ks = kalshi.summarize(kg)
+        wk_k = kg[(kg["season"] == season) & (kg["week"] == week) & (kg["side"] != "none")]
+        settled_k = wk_k[wk_k["result"].isin(["win", "loss"])]
+        lines += ["## Kalshi (prediction market)",
+                  f"Week {week}: {(settled_k['result'] == 'win').sum()}-{(settled_k['result'] == 'loss').sum()}, "
+                  f"${settled_k['profit'].sum():+,.0f}. Season: {ks['wins']}-{ks['losses']}, ${ks['profit']:+,.0f}"
+                  + (f" (ROI {ks['roi']:+.1%})" if ks["wins"] + ks["losses"] else "")
+                  + f". Only {ks['fillable_pct']:.0%} of trades had the full ${kalshi.STAKE:.0f} on offer at the quoted price.", ""]
 
     tt = meta["trained_through"]
     lines += ["---", f"Model retrained through {tt['season']} week {tt['week']} "
