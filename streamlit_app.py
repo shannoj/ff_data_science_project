@@ -269,24 +269,8 @@ with tab_exp:
             c3.metric("Profit (model rule)", f"${rule['profit']:+,.0f}")
             c4.metric("ROI (model rule)", f"{rule['roi']:+.1%}" if rule["bets"] else "—")
 
-        # Verdict
-        n = len(settled_bets)
-        if strat.empty or n < 100:
-            st.info(f"**Too early to tell.** {n} settled bets so far. Single-game yards are noisy, so luck "
-                    "dominates until there are a few hundred bets; with 100 bets the win rate is only known to about ±10%.")
-        else:
-            rule = strat.iloc[0]
-            acc = res["accuracy"]
-            if rule["roi"] > 0 and rule["p_luck"] < 0.05 and acc["model_mae"] < acc["line_mae"]:
-                st.success(f"**Promising.** The model rule is up {rule['roi']:+.1%} over {n} bets, there's only a "
-                           f"{rule['p_luck']:.1%} chance of a record this good by luck, and the model's projections "
-                           "have been closer to actual yards than the sportsbook lines.")
-            elif rule["roi"] > 0:
-                st.warning(f"**Profitable but not proven.** Up {rule['roi']:+.1%} over {n} bets, but there's a "
-                           f"{rule['p_luck']:.0%} chance of doing this well with no real edge. Keep collecting.")
-            else:
-                st.error(f"**No edge so far.** The model rule is {rule['roi']:+.1%} over {n} bets. "
-                         "Don't bet real money on it.")
+        level, message = autobet.verdict(res)
+        getattr(st, level)(message)
 
         if not strat.empty:
             st.markdown("#### Strategies on the same lines")

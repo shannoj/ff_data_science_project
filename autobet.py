@@ -245,6 +245,28 @@ def evaluate(graded):
     return {"strategies": strategies, "accuracy": accuracy, "calibration": calibration, "settled": s}
 
 
+MIN_BETS_FOR_VERDICT = 100
+
+
+def verdict(res):
+    """(level, message) summarizing whether to trust the model. level: info/success/warning/error."""
+    strat, s = res["strategies"], res["settled"]
+    n = int((s["side"] != "none").sum()) if not s.empty else 0
+    if strat.empty or n < MIN_BETS_FOR_VERDICT:
+        return "info", (f"**Too early to tell.** {n} settled bets so far (verdict starts at {MIN_BETS_FOR_VERDICT}). "
+                        "Single-game yards are noisy, so luck dominates until there are a few hundred bets; "
+                        "with 100 bets the win rate is only known to about ±10%.")
+    rule, acc = strat.iloc[0], res["accuracy"]
+    if rule["roi"] > 0 and rule["p_luck"] < 0.05 and acc["model_mae"] < acc["line_mae"]:
+        return "success", (f"**Promising.** The model rule is up {rule['roi']:+.1%} over {n} bets, there's only a "
+                           f"{rule['p_luck']:.1%} chance of a record this good by luck, and the model's projections "
+                           "have been closer to actual yards than the sportsbook lines.")
+    if rule["roi"] > 0:
+        return "warning", (f"**Profitable but not proven.** Up {rule['roi']:+.1%} over {n} bets, but there's a "
+                           f"{rule['p_luck']:.0%} chance of doing this well with no real edge. Keep collecting.")
+    return "error", f"**No edge so far.** The model rule is {rule['roi']:+.1%} over {n} bets. Don't bet real money on it."
+
+
 if __name__ == "__main__":
     key = os.environ.get("ODDS_API_KEY")
     if not key:
