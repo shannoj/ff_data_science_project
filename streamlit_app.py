@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import model as qb_model
+from bets import expected_value, get_store, grade, implied_prob, new_bet, summarize
 from data import load_all, next_week
 from pipeline import PREDICTIONS_DIR, project_week
 
@@ -46,7 +47,7 @@ target = next_week(schedule)
 st.title("NFL Quarterback Passing Yards")
 st.caption("Weekly projections from an XGBoost model on nflverse data, Vegas lines and kickoff weather.")
 
-tab_week, tab_record, tab_model = st.tabs(["This week", "Track record", "About the model"])
+tab_week, tab_bets, tab_record, tab_model = st.tabs(["This week", "Bets", "Track record", "About the model"])
 
 with tab_week:
     if target is None:
@@ -144,3 +145,99 @@ with tab_model:
     st.markdown("**What the model leans on**")
     imp = pd.Series(meta["importance"]).head(15).sort_values()
     st.bar_chart(imp, horizontal=True)
+
+with tab_bets:
+    store = get_store(st.secrets)
+    st.caption(f"Hypothetical bets on QB passing-yard props, saved to {store.label}. "
+               "Enter the line and odds from your sportsbook; bets are graded automatically once games finish.")
+    if not store.persistent_on_cloud:
+        st.caption("On Streamlit Cloud a local file is wiped whenever the app restarts. "
+                   "Add a GitHub token to the app's secrets to keep bets permanently (see `bets.py`).")
+
+    if target is not None:
+        proj = get_projections(*target)
+        st.markdown("#### Log a bet")
+        bet_qb = st.selectbox("Quarterback", proj["player_display_name"], key="bet_qb")
+        r = proj[proj["player_display_name"] == bet_qb].iloc[0]
+        c1, c2, c3, c4 = st.columns(4)
+        line = c1.number_input("Line (yards)", min_value=0.0, max_value=600.0,
+                               value=float(round(r["projection"]) + 0.5), step=1.0, key=f"line_{bet_qb}")
+        over_odds = c2.number_input("Over odds", value=-110, step=5, key="over_odds")
+        under_odds = c3.number_input("Under odds", value=-110, step=5, key="under_odds")
+        stake = c4.number_input("Stake ($)", min_value=1.0, value=10.0, step=5.0, key="stake")
+
+        valid_odds = all(o <= -100 or o >= 100 for o in (over_odds, under_odds))
+        if not valid_odds:
+            st.error("American odds must be ≤ -100 or ≥ +100.")
+        else:
+            p_over = qb_model.prob_over(meta, r["projection"], line)
+            sides = {
+                "over": (p_over, over_odds, expected_value(p_over, over_odds)),
+                "under": (1 - p_over, under_odds, expected_value(1 - p_over, under_odds)),
+            }
+            best = max(sides, key=lambda s: sides[s][2])
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Model projection", f"{r['projection']:.0f} yds")
+            for col, s in ((m2, "over"), (m3, "under")):
+                p, o, ev = sides[s]
+                col.metric(f"{s.title()} {line:g}: model chance", f"{p:.0%}",
+                           f"{ev:+.1%} EV (break-even {implied_prob(o):.0%})",
+                           delta_color="normal" if ev > 0 else "inverse" if ev < 0 else "off")
+            if sides[best][2] > 0:
+                st.success(f"Model leans **{best} {line:g}** (+{sides[best][2]:.1%} expected return per $1).")
+            else:
+                st.info("Neither side has positive expected value by the model at these odds.")
+
+            side = st.radio("Side", ["over", "under"], index=["over", "under"].index(best), horizontal=True)
+            notes = st.text_input("Notes (optional)", key="bet_notes")
+            if st.button("Log bet", type="primary"):
+                p, o, _ = sides[side]
+                log = store.load()
+                bet = new_bet(r, line, side, o, stake, p, notes)
+                log = pd.DataFrame([bet]) if log.empty else pd.concat([log, pd.DataFrame([bet])], ignore_index=True)
+                store.save(log, f"Log bet: {bet['qb']} {side} {line:g} ({o:+d})")
+                st.success(f"Logged ${stake:.0f} on {bet['qb']} {side} {line:g} at {o:+d}.")
+
+    st.markdown("#### Results")
+    log = store.load()
+    if log.empty:
+        st.info("No bets logged yet.")
+    else:
+        graded = grade(log, player_stats, schedule)
+        s = summarize(graded)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Record (W-L-P)", f"{s['wins']}-{s['losses']}-{s['pushes']}")
+        c2.metric("Profit", f"${s['profit']:+,.2f}")
+        c3.metric("ROI", f"{s['roi']:+.1%}", help="Profit ÷ amount staked on settled bets")
+        c4.metric("Pending", s["pending"])
+
+        settled = graded[graded["result"].isin(["win", "loss", "push"])].sort_values(["gameday", "placed_at"])
+        if len(settled) >= 2:
+            st.line_chart(settled.assign(**{"Cumulative profit ($)": settled["profit"].cumsum()})
+                          .reset_index(drop=True)["Cumulative profit ($)"])
+            with_model = settled["model_prob"] > 0.5
+            split = pd.DataFrame({
+                "Bets": ["Model agreed (>50%)", "Model disagreed"],
+                "Count": [with_model.sum(), (~with_model).sum()],
+                "Profit": [settled.loc[with_model, "profit"].sum(), settled.loc[~with_model, "profit"].sum()],
+            })
+            st.dataframe(split, hide_index=True, column_config={"Profit": st.column_config.NumberColumn(format="$%+.2f")})
+
+        show = graded.sort_values("placed_at", ascending=False)
+        st.dataframe(
+            show[["season", "week", "qb", "opponent", "side", "line", "odds", "stake",
+                  "projection", "model_prob", "actual", "result", "profit"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "model_prob": st.column_config.NumberColumn("Model chance", format="percent"),
+                "profit": st.column_config.NumberColumn(format="$%+.2f"),
+                "stake": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+        with st.expander("Remove bets"):
+            labels = {b: f"{q} {sd} {ln:g} (wk {wk}, ${stk:.0f})" for b, q, sd, ln, wk, stk in
+                      zip(log["bet_id"], log["qb"], log["side"], log["line"], log["week"], log["stake"])}
+            drop = st.multiselect("Select bets to remove", list(labels), format_func=labels.get)
+            if drop and st.button("Remove selected"):
+                store.save(log[~log["bet_id"].isin(drop)], f"Remove {len(drop)} bet(s)")
+                st.rerun()

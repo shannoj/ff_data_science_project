@@ -89,6 +89,8 @@ def train(dataset):
         "baseline_metrics": _metrics(te[TARGET], baseline),
         "interval": {"low": float(np.quantile(holdout, INTERVAL[0])),
                      "high": float(np.quantile(holdout, INTERVAL[1]))},
+        # Percentiles of (actual - projection) on held-out seasons; used for over/under odds.
+        "residual_quantiles": [round(float(q), 2) for q in np.quantile(holdout, np.linspace(0.005, 0.995, 100))],
         "importance": dict(sorted(importance.items(), key=lambda kv: -kv[1])),
     }
     return final, meta
@@ -118,3 +120,17 @@ def predict(model, meta, rows):
     out["low"] = (out["projection"] + meta["interval"]["low"]).clip(lower=0)
     out["high"] = out["projection"] + meta["interval"]["high"]
     return out
+
+
+def prob_over(meta, projection, line):
+    """Model probability that actual yards finish above `line`.
+
+    Uses the empirical distribution of held-out errors, so it reflects how far
+    off the model really tends to be rather than assuming a bell curve.
+    """
+    q = meta.get("residual_quantiles")
+    if q is None:  # older artifacts: fall back to a normal approximation
+        from math import erf, sqrt
+        sigma = (meta["interval"]["high"] - meta["interval"]["low"]) / 2.563
+        return 0.5 * (1 - erf((line - projection) / (sigma * sqrt(2))))
+    return float(np.mean(np.asarray(q) > line - projection))
