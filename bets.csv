@@ -1,0 +1,2 @@
+bet_id,placed_at,season,week,game_id,gameday,player_id,qb,team,opponent,line,side,odds,stake,projection,model_prob,notes
+b4aa8123a8,2026-11-14T18:22:29+00:00,2026,10,2026_10_BUF_NYJ,2026-11-15,00-0034857,Josh Allen,BUF,NYJ,240.5,over,-110,10.0,259.2,0.56,test
