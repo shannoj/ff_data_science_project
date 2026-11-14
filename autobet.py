@@ -126,13 +126,13 @@ def decide(meta, projection, line, over_odds, under_odds):
 
 def run(api_key, now=None):
     now = now or datetime.now(timezone.utc)
-    player_stats, schedule = load_all()
-    target = next_week(schedule)
+    data = load_all()
+    target = next_week(data.schedule)
     if target is None:
         print("No unplayed games left this season.")
         return
     model, meta = qb_model.load()
-    proj = project_week(player_stats, schedule, model, meta, *target)
+    proj = project_week(data, model, meta, *target)
 
     log = load_log()
     logged = set(zip(log["game_id"], log["player_id"]))

@@ -25,9 +25,8 @@ def get_data():
 
 @st.cache_data(ttl=3 * 3600, show_spinner="Projecting this week's games...")
 def get_projections(season, week):
-    player_stats, schedule = get_data()
     model, meta = get_model()
-    return project_week(player_stats, schedule, model, meta, season, week)
+    return project_week(get_data(), model, meta, season, week)
 
 
 @st.cache_data(ttl=3 * 3600)
@@ -37,13 +36,13 @@ def get_track_record():
     if not files:
         return pd.DataFrame()
     preds = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-    player_stats, _ = get_data()
-    actual = player_stats[["player_id", "game_id", "passing_yards"]]
+    actual = get_data().player_stats[["player_id", "game_id", "passing_yards"]]
     return preds.merge(actual, on=["player_id", "game_id"], how="inner")
 
 
 model, meta = get_model()
-player_stats, schedule = get_data()
+data = get_data()
+player_stats, schedule = data.player_stats, data.schedule
 target = next_week(schedule)
 
 st.title("NFL Quarterback Passing Yards")

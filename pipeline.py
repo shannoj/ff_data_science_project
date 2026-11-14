@@ -24,9 +24,9 @@ OUTPUT_COLS = [
 ]
 
 
-def project_week(player_stats, schedule, model, meta, season, week, weather=True):
-    """Projections for every unplayed game in (season, week)."""
-    dataset = build_dataset(player_stats, schedule, predict_week=(season, week))
+def project_week(data, model, meta, season, week, weather=True):
+    """Projections for every unplayed game in (season, week). `data` is a data.NFLData."""
+    dataset = build_dataset(data, predict_week=(season, week))
     upcoming = dataset[~dataset["completed"].astype(bool)
                        & (dataset["season"] == season) & (dataset["week"] == week)]
     if weather:
@@ -59,13 +59,14 @@ def main():
     args = ap.parse_args()
 
     print("Loading nflverse data...")
-    player_stats, schedule = load_all()
+    data = load_all()
+    schedule = data.schedule
 
     if args.no_train:
         model, meta = qb_model.load()
     else:
         print("Training...")
-        model, meta = qb_model.train(build_dataset(player_stats, schedule))
+        model, meta = qb_model.train(build_dataset(data))
         qb_model.save(model, meta)
         t, b = meta["test_metrics"], meta["baseline_metrics"]
         print(f"  {meta['n_trees']} trees, trained through {meta['trained_through']}")
@@ -77,7 +78,7 @@ def main():
         print("No unplayed games left this season.")
         return
     season, week = target
-    proj = project_week(player_stats, schedule, model, meta, season, week)
+    proj = project_week(data, model, meta, season, week)
     path = save_predictions(proj, meta, season, week)
 
     print(f"\n{season} week {week} projections -> {path}")

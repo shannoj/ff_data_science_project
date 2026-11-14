@@ -55,7 +55,8 @@ def report_week(schedule):
 
 
 def build_report():
-    player_stats, schedule = load_all()
+    data = load_all()
+    player_stats, schedule = data.player_stats, data.schedule
     target = report_week(schedule)
     log = autobet.load_log()
     if target is None or log.empty:
