@@ -14,9 +14,14 @@ on:
         description: "Retrain the model"
         type: boolean
         default: true
+      report:
+        description: "Post the weekly report issue"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: weekly-update
@@ -61,3 +66,18 @@ jobs:
             git commit -m "Weekly model update: $(date -u +%Y-%m-%d)"
             git push
           fi
+
+      - name: Post weekly report
+        if: github.event.schedule == '0 12 * * 2' || (github.event_name == 'workflow_dispatch' && inputs.report)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title=$(python weekly_report.py report.md | tail -n 1)
+          if [ ! -f report.md ]; then
+            echo "Nothing to report yet."
+            exit 0
+          fi
+          for n in $(gh issue list --state open --search "Auto-bet report in:title" --json number -q '.[].number'); do
+            gh issue close "$n" --comment "Superseded by the latest weekly report."
+          done
+          gh issue create --title "$title" --body-file report.md
