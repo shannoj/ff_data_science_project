@@ -11,7 +11,13 @@ Every line is logged, including ones with no bet, so other strategies and
 controls (always over, always under, any positive EV) can be judged on the
 same data. See `evaluate`.
 
-    ODDS_API_KEY=... python autobet.py
+Bets are placed at the best price across books (line shopping); each row also
+keeps a single-book quote so the value of shopping can be measured. A second
+job (`--closing`) snapshots the lines shortly before kickoff to measure
+closing line value (CLV), the fastest reliable signal of a real edge.
+
+    ODDS_API_KEY=... python autobet.py             # daily: log lines + paper bets
+    ODDS_API_KEY=... python autobet.py --closing   # near kickoff: closing lines
 """
 import os
 import re
@@ -31,7 +37,7 @@ from pipeline import project_week
 LOG_PATH = Path(__file__).parent / "experiment" / "auto_bets.csv"
 API = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
 MARKET = "player_pass_yds"
-BOOKS = ["draftkings", "fanduel", "betmgm", "caesars"]  # first one with both sides wins
+BOOKS = ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "betrivers", "fanatics"]  # first = primary
 LOOKAHEAD_HOURS = 36
 STAKE = 100.0
 MIN_EV = 0.03  # the pre-registered betting rule: bet only with >= +3% expected return
@@ -52,9 +58,18 @@ TEAM_ABBR = {
 
 LOG_COLUMNS = [
     "logged_at", "season", "week", "game_id", "gameday", "commence_time", "player_id", "qb",
-    "team", "opponent", "book", "line", "over_odds", "under_odds", "projection", "p_over",
-    "ev_over", "ev_under", "side", "odds", "stake", "model_trained_through",
+    "team", "opponent",
+    # Quote used for the model's side after line shopping (best expected value across books)
+    "book", "line", "over_odds", "under_odds", "projection", "p_over", "ev_over", "ev_under",
+    "side", "odds", "stake", "model_trained_through",
+    # Single-book reference (first of BOOKS quoting the QB), to measure what shopping adds
+    "primary_book", "primary_line", "primary_over_odds", "primary_under_odds", "primary_p_over",
+    "consensus_line", "n_books", "quotes",
 ]
+CLOSE_PATH = Path(__file__).parent / "experiment" / "closing_lines.csv"
+CLOSE_COLUMNS = ["captured_at", "game_id", "player_id", "qb", "commence_time", "minutes_before",
+                 "consensus_line", "n_books", "quotes"]
+CLOSE_WINDOW_MINUTES = 70  # closing snapshot is taken by the first run within this long before kickoff
 
 
 def _norm(name):
@@ -64,10 +79,43 @@ def _norm(name):
     return " ".join(name.split())
 
 
+def _read(path, columns):
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    return pd.read_csv(path, dtype={"game_id": str, "player_id": str, "quotes": str})
+
+
 def load_log():
-    if LOG_PATH.exists():
-        return pd.read_csv(LOG_PATH, dtype={"game_id": str, "player_id": str})
-    return pd.DataFrame(columns=LOG_COLUMNS)
+    log = _read(LOG_PATH, LOG_COLUMNS)
+    # Rows logged before line shopping existed used a single book: backfill the reference columns.
+    for ref, src in [("primary_book", "book"), ("primary_line", "line"), ("primary_over_odds", "over_odds"),
+                     ("primary_under_odds", "under_odds"), ("primary_p_over", "p_over"), ("consensus_line", "line")]:
+        if ref not in log.columns:
+            log[ref] = log[src]
+    if "n_books" not in log.columns:
+        log["n_books"] = 1
+    if "quotes" not in log.columns:
+        log["quotes"] = [_quotes_str([(b, l, o, u)]) for b, l, o, u in
+                         zip(log["book"], log["line"], log["over_odds"], log["under_odds"])]
+    return log[LOG_COLUMNS]
+
+
+def load_closing():
+    return _read(CLOSE_PATH, CLOSE_COLUMNS)
+
+
+def _quotes_str(quotes):
+    return "|".join(f"{b}:{l:g}:{int(o)}:{int(u)}" for b, l, o, u in quotes)
+
+
+def parse_quotes(text):
+    """'draftkings:235.5:-110:-110|fanduel:...' -> {book: (line, over_odds, under_odds)}."""
+    out = {}
+    for part in str(text).split("|"):
+        if part.count(":") == 3:
+            b, l, o, u = part.split(":")
+            out[b] = (float(l), int(o), int(u))
+    return out
 
 
 # ---------------------------------------------------------------- Odds API
@@ -87,12 +135,13 @@ class OddsAPI:
         return self._get(f"{API}/events")  # free: costs no credits
 
     def pass_yds_props(self, event_id):
+        # Up to 10 bookmakers cost the same single credit as one.
         return self._get(f"{API}/events/{event_id}/odds", regions="us", markets=MARKET,
                          oddsFormat="american", bookmakers=",".join(BOOKS))
 
 
-def best_book_lines(event_odds):
-    """{normalized QB name: (book, line, over_odds, under_odds)} from the first preferred book quoting both sides."""
+def all_book_quotes(event_odds):
+    """{normalized QB name: [(book, line, over_odds, under_odds), ...]} in BOOKS preference order."""
     by_book = {b["key"]: b for b in event_odds.get("bookmakers", [])}
     found = {}
     for key in BOOKS:
@@ -106,15 +155,27 @@ def best_book_lines(event_odds):
             for o in market["outcomes"]:
                 sides.setdefault(_norm(o["description"]), {})[o["name"].lower()] = (o["point"], o["price"])
         for qb, s in sides.items():
-            if qb in found or "over" not in s or "under" not in s or s["over"][0] != s["under"][0]:
-                continue
-            found[qb] = (key, float(s["over"][0]), int(s["over"][1]), int(s["under"][1]))
+            if "over" in s and "under" in s and s["over"][0] == s["under"][0]:
+                found.setdefault(qb, []).append((key, float(s["over"][0]), int(s["over"][1]), int(s["under"][1])))
     return found
+
+
+def _match(events, home_away_rows, now, horizon):
+    """Yield (event, rows for that game) for events starting in (now, now + horizon]."""
+    for ev in events:
+        start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+        if not now < start <= now + horizon:
+            continue
+        teams = [TEAM_ABBR.get(ev["home_team"]), TEAM_ABBR.get(ev["away_team"])]
+        rows = home_away_rows[home_away_rows["team"].isin(teams) & home_away_rows["opponent"].isin(teams)]
+        if not rows.empty:
+            yield ev, rows
 
 
 # ---------------------------------------------------------------- daily run
 
 def decide(meta, projection, line, over_odds, under_odds):
+    """Model call at a single quote."""
     p_over = qb_model.prob_over(meta, projection, line)
     ev_over = expected_value(p_over, over_odds)
     ev_under = expected_value(1 - p_over, under_odds)
@@ -122,6 +183,22 @@ def decide(meta, projection, line, over_odds, under_odds):
     if max(ev_over, ev_under) >= MIN_EV:
         side, odds = ("over", over_odds) if ev_over >= ev_under else ("under", under_odds)
     return p_over, ev_over, ev_under, side, odds
+
+
+def shop(meta, projection, quotes):
+    """Pick the quote with the best expected value for whichever side the model prefers.
+
+    Returns (chosen quote, decide() result at that quote).
+    """
+    best = {}
+    for q in quotes:
+        p, ev_o, ev_u, _, _ = decide(meta, projection, q[1], q[2], q[3])
+        for side, ev in (("over", ev_o), ("under", ev_u)):
+            if side not in best or ev > best[side][0]:
+                best[side] = (ev, q)
+    side = "over" if best["over"][0] >= best["under"][0] else "under"
+    q = best[side][1]
+    return q, decide(meta, projection, q[1], q[2], q[3])
 
 
 def run(api_key, now=None):
@@ -136,26 +213,19 @@ def run(api_key, now=None):
 
     log = load_log()
     logged = set(zip(log["game_id"], log["player_id"]))
+    proj = proj[[(g, p) not in logged for g, p in zip(proj["game_id"], proj["player_id"])]]
     api = OddsAPI(api_key)
     new_rows = []
 
-    for ev in api.events():
-        start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
-        if not now < start <= now + timedelta(hours=LOOKAHEAD_HOURS):
-            continue
-        home, away = TEAM_ABBR.get(ev["home_team"]), TEAM_ABBR.get(ev["away_team"])
-        game = proj[proj["team"].isin([home, away]) & proj["opponent"].isin([home, away])]
-        todo = game[[(g, p) not in logged for g, p in zip(game["game_id"], game["player_id"])]]
-        if todo.empty:
-            continue
-        lines = best_book_lines(api.pass_yds_props(ev["id"]))
+    for ev, todo in _match(api.events(), proj, now, timedelta(hours=LOOKAHEAD_HOURS)):
+        quotes_by_qb = all_book_quotes(api.pass_yds_props(ev["id"]))
         for _, r in todo.iterrows():
-            quote = lines.get(_norm(r["player_display_name"]))
-            if quote is None:
+            quotes = quotes_by_qb.get(_norm(r["player_display_name"]))
+            if not quotes:
                 print(f"  no line yet: {r['player_display_name']} ({r['team']})")
                 continue
-            book, line, over_odds, under_odds = quote
-            p_over, ev_over, ev_under, side, odds = decide(meta, r["projection"], line, over_odds, under_odds)
+            (book, line, over_odds, under_odds), (p_over, ev_over, ev_under, side, odds) = shop(meta, r["projection"], quotes)
+            primary = quotes[0]
             new_rows.append({
                 "logged_at": now.isoformat(timespec="seconds"), "season": r["season"], "week": r["week"],
                 "game_id": r["game_id"], "gameday": r["gameday"], "commence_time": ev["commence_time"],
@@ -165,9 +235,14 @@ def run(api_key, now=None):
                 "p_over": round(p_over, 4), "ev_over": round(ev_over, 4), "ev_under": round(ev_under, 4),
                 "side": side, "odds": odds, "stake": STAKE if side != "none" else 0.0,
                 "model_trained_through": "{season}-wk{week}".format(**meta["trained_through"]),
+                "primary_book": primary[0], "primary_line": primary[1], "primary_over_odds": primary[2],
+                "primary_under_odds": primary[3],
+                "primary_p_over": round(qb_model.prob_over(meta, r["projection"], primary[1]), 4),
+                "consensus_line": float(np.median([q[1] for q in quotes])), "n_books": len(quotes),
+                "quotes": _quotes_str(quotes),
             })
-            print(f"  {r['player_display_name']:22s} line {line:6.1f}  proj {r['projection']:6.1f}  "
-                  f"P(over) {p_over:.0%}  -> {side}")
+            print(f"  {r['player_display_name']:22s} {book:10s} line {line:6.1f}  proj {r['projection']:6.1f}  "
+                  f"P(over) {p_over:.0%}  -> {side}  ({len(quotes)} books)")
 
     if new_rows:
         LOG_PATH.parent.mkdir(exist_ok=True)
@@ -176,6 +251,42 @@ def run(api_key, now=None):
         log.to_csv(LOG_PATH, index=False)
     print(f"Logged {len(new_rows)} lines ({sum(r['side'] != 'none' for r in new_rows)} bets). "
           f"Odds API credits remaining: {api.remaining}")
+
+
+def run_closing(api_key, now=None):
+    """Snapshot lines shortly before kickoff for every logged QB-game (once each)."""
+    now = now or datetime.now(timezone.utc)
+    log, closing = load_log(), load_closing()
+    done = set(zip(closing["game_id"], closing["player_id"]))
+    kickoff = pd.to_datetime(log["commence_time"], utc=True)
+    window = timedelta(minutes=CLOSE_WINDOW_MINUTES)
+    due = log[(kickoff > now) & (kickoff <= now + window)
+              & np.array([(g, p) not in done for g, p in zip(log["game_id"], log["player_id"])], dtype=bool)]
+    if due.empty:
+        print("No logged games kicking off soon; nothing to do (no API credits used).")
+        return
+    api = OddsAPI(api_key)
+    rows = []
+    for ev, todo in _match(api.events(), due, now, window):
+        quotes_by_qb = all_book_quotes(api.pass_yds_props(ev["id"]))
+        start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+        for _, r in todo.iterrows():
+            quotes = quotes_by_qb.get(_norm(r["qb"]))
+            if not quotes:
+                print(f"  no closing line: {r['qb']}")
+                continue
+            rows.append({"captured_at": now.isoformat(timespec="seconds"), "game_id": r["game_id"],
+                         "player_id": r["player_id"], "qb": r["qb"], "commence_time": ev["commence_time"],
+                         "minutes_before": round((start - now).total_seconds() / 60),
+                         "consensus_line": float(np.median([q[1] for q in quotes])), "n_books": len(quotes),
+                         "quotes": _quotes_str(quotes)})
+            print(f"  close {r['qb']:22s} {rows[-1]['consensus_line']:6.1f} (opened {r['line']:g} at {r['book']})")
+    if rows:
+        CLOSE_PATH.parent.mkdir(exist_ok=True)
+        new = pd.DataFrame(rows, columns=CLOSE_COLUMNS)
+        closing = new if closing.empty else pd.concat([closing, new], ignore_index=True)
+        closing.to_csv(CLOSE_PATH, index=False)
+    print(f"Captured {len(rows)} closing lines. Odds API credits remaining: {api.remaining}")
 
 
 # ---------------------------------------------------------------- evaluation
@@ -190,10 +301,14 @@ def grade_lines(log, player_stats, schedule):
     return out
 
 
-def _strategy(rows, sides, odds):
-    """Results of betting `sides` (Series of over/under) at `odds` on `rows`; pushes excluded from W/L."""
-    over_hit = rows["actual"] > rows["line"]
-    push = rows["actual"] == rows["line"]
+def _ev(p, odds):
+    return p * odds.map(payout_multiple) - (1 - p)
+
+
+def _strategy(rows, line, sides, odds):
+    """Results of betting `sides` at `line`/`odds` on `rows`; pushes excluded from W/L."""
+    over_hit = rows["actual"] > line
+    push = rows["actual"] == line
     win = (over_hit == (sides == "over")) & ~push
     profit = np.where(push, 0.0, np.where(win, STAKE * odds.map(payout_multiple), -STAKE))
     n, wins = int((~push).sum()), int(win.sum())
@@ -213,27 +328,36 @@ def evaluate(graded):
     s = graded[graded["settled"]].copy()
     if s.empty:
         return {"strategies": pd.DataFrame(), "accuracy": {}, "calibration": pd.DataFrame(), "settled": s}
-    model_side = np.where(s["ev_over"] >= s["ev_under"], "over", "under")
-    model_odds = pd.Series(np.where(model_side == "over", s["over_odds"], s["under_odds"]), index=s.index)
-    best_ev = s[["ev_over", "ev_under"]].max(axis=1)
+
+    # One-book view: what the model would have done without line shopping.
+    line1, over1, under1 = s["primary_line"], s["primary_over_odds"], s["primary_under_odds"]
+    ev_o1, ev_u1 = _ev(s["primary_p_over"], over1), _ev(1 - s["primary_p_over"], under1)
+    side1 = pd.Series(np.where(ev_o1 >= ev_u1, "over", "under"), index=s.index)
+    odds1 = pd.Series(np.where(side1 == "over", over1, under1), index=s.index)
+    best1 = np.maximum(ev_o1, ev_u1)
 
     rows = {}
     rule = s[s["side"] != "none"]
-    rows[f"Model rule (EV ≥ {MIN_EV:.0%}) — the real test"] = _strategy(rule, rule["side"], rule["odds"])
-    pos = best_ev > 0
-    rows["Any positive EV"] = _strategy(s[pos], pd.Series(model_side, index=s.index)[pos], model_odds[pos])
-    rows["Model's side on every line"] = _strategy(s, pd.Series(model_side, index=s.index), model_odds)
-    rows["Control: always over"] = _strategy(s, pd.Series("over", index=s.index), s["over_odds"])
-    rows["Control: always under"] = _strategy(s, pd.Series("under", index=s.index), s["under_odds"])
+    rows[f"Model rule (EV ≥ {MIN_EV:.0%}), best price — the real test"] = _strategy(
+        rule, rule["line"], rule["side"], rule["odds"])
+    r1 = best1 >= MIN_EV
+    rows["Model rule, one book (no line shopping)"] = _strategy(s[r1], line1[r1], side1[r1], odds1[r1])
+    pos = best1 > 0
+    rows["Any positive EV (one book)"] = _strategy(s[pos], line1[pos], side1[pos], odds1[pos])
+    rows["Model's side on every line (one book)"] = _strategy(s, line1, side1, odds1)
+    rows["Control: always over"] = _strategy(s, line1, pd.Series("over", index=s.index), over1)
+    rows["Control: always under"] = _strategy(s, line1, pd.Series("under", index=s.index), under1)
     strategies = pd.DataFrame(rows).T
 
+    market = s["consensus_line"]
     accuracy = {
         "n": len(s),
         "model_mae": float((s["actual"] - s["projection"]).abs().mean()),
-        "line_mae": float((s["actual"] - s["line"]).abs().mean()),
-        "model_closer_pct": float(((s["actual"] - s["projection"]).abs() < (s["actual"] - s["line"]).abs()).mean()),
+        "line_mae": float((s["actual"] - market).abs().mean()),
+        "model_closer_pct": float(((s["actual"] - s["projection"]).abs() < (s["actual"] - market).abs()).mean()),
     }
 
+    model_side = np.where(s["ev_over"] >= s["ev_under"], "over", "under")
     p_side = np.where(model_side == "over", s["p_over"], 1 - s["p_over"])
     hit = np.where(model_side == "over", s["actual"] > s["line"], s["actual"] < s["line"])
     cal = pd.DataFrame({"p": p_side, "hit": hit})
@@ -243,6 +367,40 @@ def evaluate(graded):
                    .reset_index())
     calibration["bucket"] = calibration["bucket"].astype(str)
     return {"strategies": strategies, "accuracy": accuracy, "calibration": calibration, "settled": s}
+
+
+def closing_value(log, closing):
+    """Per-bet closing line value: yards the line moved toward the bet after it was placed.
+
+    Positive means the market moved your way (you got a better number than the close),
+    the most reliable early sign of a real edge. Uses the same book's closing line when
+    available, else the closing consensus.
+    """
+    bets = log[log["side"] != "none"]
+    if bets.empty or closing.empty:
+        return pd.DataFrame()
+    c = closing[["game_id", "player_id", "consensus_line", "quotes", "minutes_before"]].rename(
+        columns={"consensus_line": "close_consensus", "quotes": "close_quotes"})
+    m = bets.merge(c, on=["game_id", "player_id"], how="inner")
+    same = [parse_quotes(q).get(b) for q, b in zip(m["close_quotes"], m["book"])]
+    m["close_line"] = [s[0] if s else cc for s, cc in zip(same, m["close_consensus"])]
+    m["same_book_close"] = [s is not None for s in same]
+    m["clv_yards"] = np.where(m["side"] == "over", m["close_line"] - m["line"], m["line"] - m["close_line"])
+    return m
+
+
+def clv_summary(clv):
+    if clv.empty:
+        return {"n": 0}
+    x = clv["clv_yards"]
+    return {
+        "n": int(len(x)),
+        "mean": float(x.mean()),
+        "ci95": float(1.96 * x.std(ddof=1) / np.sqrt(len(x))) if len(x) > 1 else np.nan,
+        "beat_pct": float((x > 0).mean()),
+        "same_pct": float((x == 0).mean()),
+        "worse_pct": float((x < 0).mean()),
+    }
 
 
 MIN_BETS_FOR_VERDICT = 100
@@ -268,8 +426,11 @@ def verdict(res):
 
 
 if __name__ == "__main__":
+    import sys
     key = os.environ.get("ODDS_API_KEY")
     if not key:
         print("ODDS_API_KEY not set; skipping. Get a free key at https://the-odds-api.com")
+    elif "--closing" in sys.argv:
+        run_closing(key)
     else:
         run(key)
