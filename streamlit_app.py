@@ -1,10 +1,12 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
+import autobet
 import model as qb_model
-from bets import expected_value, get_store, grade, implied_prob, new_bet, summarize
+from bets import payout_multiple, expected_value, get_store, grade, implied_prob, new_bet, summarize
 from data import load_all, next_week
 from pipeline import PREDICTIONS_DIR, project_week
 
@@ -47,7 +49,8 @@ target = next_week(schedule)
 st.title("NFL Quarterback Passing Yards")
 st.caption("Weekly projections from an XGBoost model on nflverse data, Vegas lines and kickoff weather.")
 
-tab_week, tab_bets, tab_record, tab_model = st.tabs(["This week", "Bets", "Track record", "About the model"])
+tab_week, tab_exp, tab_bets, tab_record, tab_model = st.tabs(
+    ["This week", "Auto-bet experiment", "My bets", "Track record", "About the model"])
 
 with tab_week:
     if target is None:
@@ -241,3 +244,96 @@ with tab_bets:
             if drop and st.button("Remove selected"):
                 store.save(log[~log["bet_id"].isin(drop)], f"Remove {len(drop)} bet(s)")
                 st.rerun()
+
+with tab_exp:
+    st.markdown("Every day an automated job pulls sportsbook passing-yard lines for games starting in the next "
+                f"{autobet.LOOKAHEAD_HOURS} hours and records the model's call on each one. It places a hypothetical "
+                f"**${autobet.STAKE:.0f} bet whenever the model sees at least +{autobet.MIN_EV:.0%} expected value**. "
+                "Lines are logged before kickoff and never edited, so this is a true out-of-sample test.")
+    exp_log = autobet.load_log()
+    if exp_log.empty:
+        st.info("No lines logged yet. The experiment starts once an Odds API key is added to the GitHub repo "
+                "secrets as `ODDS_API_KEY`.")
+    else:
+        graded = autobet.grade_lines(exp_log, player_stats, schedule)
+        res = autobet.evaluate(graded)
+        bets_placed = graded[graded["side"] != "none"]
+        settled_bets = bets_placed[bets_placed["settled"]]
+        strat = res["strategies"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Lines logged", len(graded))
+        c2.metric("Bets placed", len(bets_placed), f"{(~bets_placed['settled']).sum()} pending", delta_color="off")
+        if not strat.empty:
+            rule = strat.iloc[0]
+            c3.metric("Profit (model rule)", f"${rule['profit']:+,.0f}")
+            c4.metric("ROI (model rule)", f"{rule['roi']:+.1%}" if rule["bets"] else "—")
+
+        # Verdict
+        n = len(settled_bets)
+        if strat.empty or n < 100:
+            st.info(f"**Too early to tell.** {n} settled bets so far. Single-game yards are noisy, so luck "
+                    "dominates until there are a few hundred bets; with 100 bets the win rate is only known to about ±10%.")
+        else:
+            rule = strat.iloc[0]
+            acc = res["accuracy"]
+            if rule["roi"] > 0 and rule["p_luck"] < 0.05 and acc["model_mae"] < acc["line_mae"]:
+                st.success(f"**Promising.** The model rule is up {rule['roi']:+.1%} over {n} bets, there's only a "
+                           f"{rule['p_luck']:.1%} chance of a record this good by luck, and the model's projections "
+                           "have been closer to actual yards than the sportsbook lines.")
+            elif rule["roi"] > 0:
+                st.warning(f"**Profitable but not proven.** Up {rule['roi']:+.1%} over {n} bets, but there's a "
+                           f"{rule['p_luck']:.0%} chance of doing this well with no real edge. Keep collecting.")
+            else:
+                st.error(f"**No edge so far.** The model rule is {rule['roi']:+.1%} over {n} bets. "
+                         "Don't bet real money on it.")
+
+        if not strat.empty:
+            st.markdown("#### Strategies on the same lines")
+            st.caption("The model rule is the real test. Controls show what blind betting would have done; "
+                       "\"Chance it's luck\" is the probability of at least this win rate with no edge at all.")
+            st.dataframe(
+                strat.reset_index(names="Strategy")[["Strategy", "bets", "wins", "losses", "pushes",
+                                                     "win_rate", "breakeven", "profit", "roi", "p_luck"]],
+                hide_index=True, width="stretch",
+                column_config={
+                    "win_rate": st.column_config.NumberColumn("Win rate", format="percent"),
+                    "breakeven": st.column_config.NumberColumn("Break-even", format="percent"),
+                    "profit": st.column_config.NumberColumn("Profit", format="$%+.0f"),
+                    "roi": st.column_config.NumberColumn("ROI", format="percent"),
+                    "p_luck": st.column_config.NumberColumn("Chance it's luck", format="percent"),
+                },
+            )
+
+            acc = res["accuracy"]
+            st.markdown("#### Model vs. the sportsbook line")
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Model avg miss", f"{acc['model_mae']:.1f} yds")
+            a2.metric("Line avg miss", f"{acc['line_mae']:.1f} yds")
+            a3.metric("Model closer to actual", f"{acc['model_closer_pct']:.0%}", help=f"Of {acc['n']} settled lines")
+            st.caption("If the line keeps missing by less than the model, the books know something the model doesn't.")
+
+            st.markdown("#### Calibration")
+            st.caption("When the model says a side hits X% of the time, does it? Points well below the "
+                       "\"model said\" values mean the model is overconfident.")
+            st.dataframe(res["calibration"], hide_index=True, column_config={
+                "model_said": st.column_config.NumberColumn("Model said", format="percent"),
+                "actually_hit": st.column_config.NumberColumn("Actually hit", format="percent"),
+            })
+
+            if len(settled_bets) >= 2:
+                sb = settled_bets.sort_values("commence_time").copy()
+                won = (sb["actual"] > sb["line"]) == (sb["side"] == "over")
+                push = sb["actual"] == sb["line"]
+                sb["profit"] = np.where(push, 0.0, np.where(won, sb["stake"] * sb["odds"].map(payout_multiple), -sb["stake"]))
+                st.markdown("#### Cumulative profit, model rule")
+                st.line_chart(sb["profit"].cumsum().reset_index(drop=True).rename("Profit ($)"))
+
+        st.markdown("#### Bet log")
+        log_view = graded.sort_values("commence_time", ascending=False)
+        st.dataframe(
+            log_view[["week", "qb", "opponent", "book", "line", "over_odds", "under_odds", "projection",
+                      "p_over", "side", "odds", "actual"]],
+            hide_index=True, width="stretch",
+            column_config={"p_over": st.column_config.NumberColumn("Model P(over)", format="percent")},
+        )
