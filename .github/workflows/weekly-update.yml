@@ -1,12 +1,13 @@
-name: Weekly model update
+name: Model update and auto-bet
 
 # Tuesday: retrain on last week's results and project the next week.
-# Saturday: refresh projections for unplayed games with the latest starters,
-# lines and weather. Games already played keep their original projection.
+# Daily: refresh projections for unplayed games (latest starters, lines and
+# weather; games already played keep their original projection) and log
+# sportsbook lines + paper bets for games starting in the next 36 hours.
 on:
   schedule:
-    - cron: "0 12 * * 2"   # Tuesday 12:00 UTC
-    - cron: "0 14 * * 6"   # Saturday 14:00 UTC
+    - cron: "0 12 * * 2"   # Tuesday 12:00 UTC: retrain
+    - cron: "0 15 * * *"   # Daily 15:00 UTC (10-11am ET): refresh + auto-bet
   workflow_dispatch:
     inputs:
       retrain:
@@ -38,17 +39,22 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.retrain }}" = "false" ]; then
             python pipeline.py --no-train
-          elif [ "${{ github.event.schedule }}" = "0 14 * * 6" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 15 * * *" ]; then
             python pipeline.py --no-train
           else
             python pipeline.py
           fi
 
+      - name: Log lines and paper bets
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python autobet.py
+
       - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add artifacts predictions
+          git add artifacts predictions experiment
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
