@@ -29,6 +29,7 @@ import pandas as pd
 import requests
 from scipy.stats import binomtest
 
+import kalshi
 import model as qb_model
 from bets import expected_value, implied_prob, payout_multiple
 from data import load_all, next_week
@@ -202,6 +203,7 @@ def shop(meta, projection, quotes):
 
 
 def run(api_key, now=None):
+    """Daily job: sportsbook lines + paper bets (needs api_key), then Kalshi (free)."""
     now = now or datetime.now(timezone.utc)
     player_stats, schedule = load_all()
     target = next_week(schedule)
@@ -210,6 +212,19 @@ def run(api_key, now=None):
         return
     model, meta = qb_model.load()
     proj = project_week(player_stats, schedule, model, meta, *target)
+
+    if api_key:
+        run_sportsbooks(api_key, proj, meta, now)
+    else:
+        print("ODDS_API_KEY not set; skipping sportsbook lines. Get a free key at https://the-odds-api.com")
+    try:
+        kalshi.log_trades(proj, meta, now, LOOKAHEAD_HOURS)
+    except requests.RequestException as e:  # never let Kalshi break the sportsbook log
+        print(f"Kalshi lookup failed: {e}")
+
+
+def run_sportsbooks(api_key, proj, meta, now):
+    """Log sportsbook prop lines (best price across books) and paper bets."""
 
     log = load_log()
     logged = set(zip(log["game_id"], log["player_id"]))
@@ -428,9 +443,10 @@ def verdict(res):
 if __name__ == "__main__":
     import sys
     key = os.environ.get("ODDS_API_KEY")
-    if not key:
-        print("ODDS_API_KEY not set; skipping. Get a free key at https://the-odds-api.com")
-    elif "--closing" in sys.argv:
-        run_closing(key)
+    if "--closing" in sys.argv:
+        if key:
+            run_closing(key)
+        else:
+            print("ODDS_API_KEY not set; skipping closing lines.")
     else:
         run(key)

@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import autobet
+import kalshi
 import model as qb_model
 from bets import payout_multiple, expected_value, get_store, grade, implied_prob, new_bet, summarize
 from data import load_all, next_week
@@ -344,3 +345,39 @@ with tab_exp:
             hide_index=True, width="stretch",
             column_config={"p_over": st.column_config.NumberColumn("Model P(over)", format="percent")},
         )
+
+with tab_exp:
+    st.markdown("---")
+    st.markdown("### Kalshi (prediction market)")
+    st.caption(f"The same model, paper-trading Kalshi's QB passing-yard contracts: the best yes/no contract priced "
+               f"{kalshi.MIN_PRICE:.0%}-{kalshi.MAX_PRICE:.0%}, after Kalshi's fee, if expected return is at least "
+               f"+{kalshi.MIN_EV:.0%}. Exchanges don't limit winners, but order books are thin: \"fillable\" means "
+               f"${kalshi.STAKE:.0f} was actually on offer at that price.")
+    k_log = kalshi.load_log()
+    if k_log.empty:
+        st.info("No Kalshi markets logged yet. The daily job records them for games starting within 36 hours.")
+    else:
+        kg = kalshi.grade(k_log, player_stats, schedule)
+        ks = kalshi.summarize(kg)
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Trades", ks["trades"], f"{ks['pending']} pending", delta_color="off")
+        k2.metric("Record", f"{ks['wins']}-{ks['losses']}")
+        k3.metric("Profit", f"${ks['profit']:+,.0f}", f"ROI {ks['roi']:+.1%}" if ks["wins"] + ks["losses"] else None,
+                  delta_color="off")
+        k4.metric("Fillable at $100", f"{ks['fillable_pct']:.0%}" if ks["trades"] else "—",
+                  help="Share of trades where the full stake was available at the quoted price")
+        trades = kg[kg["side"] != "none"].sort_values("kickoff", ascending=False)
+        st.dataframe(
+            trades.assign(contract=trades["side"].str.upper() + " " + (trades["strike"] + 0.5).map("{:g}+".format))[
+                ["week", "qb", "opponent", "contract", "price", "model_p", "ev", "size_available", "fillable",
+                 "actual", "result", "profit"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                "model_p": st.column_config.NumberColumn("Model chance", format="percent"),
+                "ev": st.column_config.NumberColumn("Expected return", format="percent"),
+                "size_available": st.column_config.NumberColumn("Contracts on offer", format="%d"),
+                "profit": st.column_config.NumberColumn(format="$%+.0f"),
+            },
+        )
+
