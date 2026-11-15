@@ -9,8 +9,10 @@ import pandas as pd
 
 TARGET = "passing_yards"
 
-# A QB game counts toward "form" (and as a training row) only with this many
-# attempts, so mop-up cameos don't drag averages around.
+# A QB game counts toward his recent "form" only with this many attempts, so
+# cameos don't drag averages around. Training rows are every game a QB started,
+# however short (an early injury exit still settles bets), so the model's
+# error distribution includes that risk.
 MIN_ATTEMPTS = 10
 
 QB_FEATURES = [
@@ -93,9 +95,9 @@ def team_games(schedule):
 
 # ---------------------------------------------------------------- QB + defense history
 
-def qb_history(player_stats):
+def qb_history(player_stats, min_attempts=MIN_ATTEMPTS):
     q = player_stats[(player_stats["position"] == "QB")
-                     & (player_stats["attempts"] >= MIN_ATTEMPTS)].copy()
+                     & (player_stats["attempts"] >= min_attempts)].copy()
     q["dropbacks"] = q["attempts"] + q["sacks_suffered"]
     return q[["player_id", "player_display_name", "team", "game_id", "season", "week",
               "passing_cpoe", "dropbacks"] + _PASS_COLS]
@@ -115,9 +117,16 @@ def last_starters(qb_hist):
     return latest.set_index("team")[["player_id", "player_display_name"]]
 
 
+_FORM_STATS = ["passing_yards", "attempts", "completions", "passing_air_yards", "passing_epa",
+               "passing_cpoe", "dropbacks", "sacks_suffered", "passing_interceptions"]
+
+
 def _add_qb_form(rows):
     rows = rows.sort_values(["player_id", "season", "week"]).reset_index(drop=True)
     k = "player_id"
+    # Short games (e.g. an early injury exit) are training rows but don't count toward form.
+    saved = rows[_FORM_STATS].copy()
+    rows.loc[~rows["counts_for_form"].astype(bool), _FORM_STATS] = np.nan
     s8 = _prior(rows, k, ["passing_yards", "attempts", "passing_air_yards", "passing_epa",
                           "dropbacks", "sacks_suffered", "passing_interceptions"], 8, "sum")
     m8 = _prior(rows, k, ["passing_yards", "attempts", "passing_cpoe"], 8, "mean")
@@ -131,11 +140,13 @@ def _add_qb_form(rows):
     rows["qb_epa_db_8"] = _ratio(s8["passing_epa"], s8["dropbacks"])
     rows["qb_sack_rate_8"] = _ratio(s8["sacks_suffered"], s8["dropbacks"])
     rows["qb_int_rate_8"] = _ratio(s8["passing_interceptions"], s8["attempts"])
-    rows["qb_games_prior"] = rows.groupby(k).cumcount().clip(upper=50)
+    prior_form_games = rows["counts_for_form"].astype(float).groupby(rows[k]).shift(1).fillna(0)
+    rows["qb_games_prior"] = prior_form_games.groupby(rows[k]).cumsum().clip(upper=50)
 
     season_prev = rows.groupby([k, "season"])["passing_yards"].shift(1)
     rows["qb_ypg_season"] = (season_prev.groupby([rows[k], rows["season"]])
                              .transform(lambda s: s.expanding().mean()))
+    rows[_FORM_STATS] = saved
     return rows
 
 
@@ -163,9 +174,19 @@ def build_dataset(player_stats, schedule, predict_week=None):
     with the projected starter for each team and no target.
     """
     tg = team_games(schedule)
-    qb = qb_history(player_stats)
+    qb = qb_history(player_stats)  # 10+ attempts: these count toward form
+
+    # Every completed game's actual starter, with however many attempts he got.
+    starts = (tg[tg["completed"] & tg["sched_qb_id"].notna()][["game_id", "team", "sched_qb_id"]]
+              .rename(columns={"sched_qb_id": "player_id"}))
+    start_rows = qb_history(player_stats, min_attempts=0).merge(starts, on=["game_id", "team", "player_id"])
+    start_keys = set(zip(starts["game_id"], starts["player_id"]))
+    games = pd.concat([qb, start_rows], ignore_index=True).drop_duplicates(["player_id", "game_id"])
+    games["is_start"] = [(g, p) in start_keys for g, p in zip(games["game_id"], games["player_id"])]
+    games["counts_for_form"] = games["attempts"] >= MIN_ATTEMPTS
+
     ctx = tg.drop(columns=["season", "week"])
-    rows = qb.merge(ctx, on=["game_id", "team"], how="inner")
+    rows = games.merge(ctx, on=["game_id", "team"], how="inner")
 
     upcoming = pd.DataFrame()
     if predict_week is not None:
@@ -176,7 +197,7 @@ def build_dataset(player_stats, schedule, predict_week=None):
         upcoming["player_id"] = upcoming["sched_qb_id"].fillna(upcoming["team"].map(fallback["player_id"]))
         upcoming["player_display_name"] = (upcoming["player_id"].map(names)
                                            .fillna(upcoming["sched_qb_name"]))
-        upcoming = upcoming[upcoming["player_id"].notna()]
+        upcoming = upcoming[upcoming["player_id"].notna()].assign(is_start=True, counts_for_form=False)
         rows = pd.concat([rows, upcoming], ignore_index=True)
 
     rows = _add_qb_form(rows)

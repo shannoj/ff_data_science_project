@@ -100,7 +100,11 @@ def _metrics(y, pred):
 
 
 def labeled_rows(dataset):
-    return dataset[dataset["completed"].astype(bool) & dataset[TARGET].notna()]
+    """Completed games the QB started (relief appearances are form history only)."""
+    keep = dataset["completed"].astype(bool) & dataset[TARGET].notna()
+    if "is_start" in dataset.columns:
+        keep &= dataset["is_start"].astype(bool)
+    return dataset[keep]
 
 
 def train(dataset):
