@@ -147,7 +147,9 @@ def grade(bets, player_stats, schedule):
     if bets.empty:
         return bets.assign(actual=pd.Series(dtype=float), result=pd.Series(dtype=str),
                            profit=pd.Series(dtype=float))
-    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"])
+    # Final AND stats published: scores post right away, player stats usually overnight, so a
+    # finished game with no stats yet stays pending instead of looking like the QB sat out.
+    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"]) & set(player_stats["game_id"])
     actual = player_stats.set_index(["player_id", "game_id"])["passing_yards"]
     out = bets.copy()
     keys = list(zip(out["player_id"], out["game_id"]))
