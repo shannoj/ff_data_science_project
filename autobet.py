@@ -308,7 +308,9 @@ def run_closing(api_key, now=None):
 
 def grade_lines(log, player_stats, schedule):
     """Add actual yards and a `settled` flag (game final and QB recorded stats)."""
-    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"])
+    # Final AND stats published: scores post right away, player stats usually overnight, so a
+    # finished game with no stats yet stays pending instead of looking like the QB sat out.
+    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"]) & set(player_stats["game_id"])
     actual = player_stats.set_index(["player_id", "game_id"])["passing_yards"]
     out = log.copy()
     out["actual"] = [actual.get(k) for k in zip(out["player_id"], out["game_id"])]

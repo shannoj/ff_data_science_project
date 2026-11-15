@@ -63,7 +63,9 @@ def build_report():
         return None
     season, week = target
     graded = autobet.grade_lines(log, player_stats, schedule)
-    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"])
+    # Final AND stats published: scores post right away, player stats usually overnight, so a
+    # finished game with no stats yet stays pending instead of looking like the QB sat out.
+    done = set(schedule.loc[schedule["home_score"].notna(), "game_id"]) & set(player_stats["game_id"])
     graded["game_done"] = graded["game_id"].isin(done)
     wk = graded[(graded["season"] == season) & (graded["week"] == week)]
     if wk.empty:
