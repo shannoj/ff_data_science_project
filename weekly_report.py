@@ -122,8 +122,13 @@ def build_report():
         acc = res["accuracy"]
         lines += ["", f"**Model vs. sportsbook line** ({acc['n']} settled lines): the model's projection missed by "
                   f"{acc['model_mae']:.1f} yds on average vs. {acc['line_mae']:.1f} for the line, and was closer "
-                  f"{acc['model_closer_pct']:.0%} of the time.", "",
-                  "**Calibration** (when the model says a side hits X%, how often it actually did):", ""]
+                  f"{acc['model_closer_pct']:.0%} of the time.", ""]
+        if acc.get("prob_n"):
+            lines += [f"**Probability accuracy** ({acc['prob_n']} lines, lower is better): Brier "
+                      f"{acc['model_brier']:.3f} model vs. {acc['market_brier']:.3f} market (no-vig); log loss "
+                      f"{acc['model_log_loss']:.3f} vs. {acc['market_log_loss']:.3f}. Skill vs. market: "
+                      f"{acc['prob_skill']:+.1%} (positive means the model's probabilities beat the book's).", ""]
+        lines += ["**Calibration** (when the model says a side hits X%, how often it actually did):", ""]
         lines.append(_table(res["calibration"].rename(columns={
             "bucket": "Model chance", "lines": "Lines", "model_said": "Model said", "actually_hit": "Actually hit"}),
             {"Model said": "{:.0%}".format, "Actually hit": "{:.0%}".format}))

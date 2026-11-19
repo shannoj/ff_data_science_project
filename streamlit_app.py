@@ -321,6 +321,16 @@ with tab_exp:
             a3.metric("Model closer to actual", f"{acc['model_closer_pct']:.0%}", help=f"Of {acc['n']} settled lines")
             st.caption("If the line keeps missing by less than the model, the books know something the model doesn't.")
 
+            if acc.get("prob_n"):
+                st.markdown("#### Probability accuracy: model vs. market")
+                st.caption("Brier score and log loss punish confident wrong calls and reward confident right ones "
+                           "(lower is better). The market's probability is the sportsbook's odds with the vig removed. "
+                           "Positive skill means the model's probabilities beat the book's.")
+                b1, b2, b3 = st.columns(3)
+                b1.metric("Brier: model / market", f"{acc['model_brier']:.3f} / {acc['market_brier']:.3f}")
+                b2.metric("Log loss: model / market", f"{acc['model_log_loss']:.3f} / {acc['market_log_loss']:.3f}")
+                b3.metric("Skill vs. market", f"{acc['prob_skill']:+.1%}", help=f"Of {acc['prob_n']} settled lines")
+
             st.markdown("#### Calibration")
             st.caption("When the model says a side hits X% of the time, does it? Points well below the "
                        "\"model said\" values mean the model is overconfident.")
