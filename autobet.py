@@ -42,6 +42,7 @@ BOOKS = ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "betriv
 LOOKAHEAD_HOURS = 36
 STAKE = 100.0
 MIN_EV = 0.03  # the pre-registered betting rule: bet only with >= +3% expected return
+KELLY_CAP = 3.0  # shadow Kelly strategy: no bet larger than 3x the average stake
 
 TEAM_ABBR = {
     "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
@@ -322,15 +323,34 @@ def _ev(p, odds):
     return p * odds.map(payout_multiple) - (1 - p)
 
 
-def _strategy(rows, line, sides, odds):
-    """Results of betting `sides` at `line`/`odds` on `rows`; pushes excluded from W/L."""
+def kelly_stakes(p, odds, cap=KELLY_CAP):
+    """Stakes proportional to the Kelly fraction (EV / payout), scaled so they average STAKE.
+
+    Scaling uses only the model's probabilities and the odds, never outcomes, so the
+    total money staked matches the flat rule and profit is directly comparable.
+    Each bet is capped at about `cap` times the average so one wild projection can't dominate.
+    """
+    b = odds.map(payout_multiple)
+    f = ((p * b - (1 - p)) / b).clip(lower=0)
+    if len(f) == 0 or f.sum() == 0:
+        return pd.Series(STAKE, index=p.index)
+    stakes = (f / f.mean()).clip(upper=cap)
+    return STAKE * stakes / stakes.mean()
+
+
+def _strategy(rows, line, sides, odds, stakes=None):
+    """Results of betting `sides` at `line`/`odds` on `rows`; pushes excluded from W/L.
+
+    `stakes` defaults to a flat STAKE per bet.
+    """
+    stakes = pd.Series(STAKE, index=rows.index) if stakes is None else stakes
     over_hit = rows["actual"] > line
     push = rows["actual"] == line
     win = (over_hit == (sides == "over")) & ~push
-    profit = np.where(push, 0.0, np.where(win, STAKE * odds.map(payout_multiple), -STAKE))
+    profit = np.where(push, 0.0, np.where(win, stakes * odds.map(payout_multiple), -stakes))
     n, wins = int((~push).sum()), int(win.sum())
     breakeven = float(odds.map(implied_prob).mean()) if len(odds) else np.nan
-    staked = STAKE * len(rows)
+    staked = float(stakes.sum())
     return {
         "bets": len(rows), "wins": wins, "losses": n - wins, "pushes": int(push.sum()),
         "win_rate": wins / n if n else np.nan, "breakeven": breakeven,
@@ -357,6 +377,11 @@ def evaluate(graded):
     rule = s[s["side"] != "none"]
     rows[f"Model rule (EV ≥ {MIN_EV:.0%}), best price — the real test"] = _strategy(
         rule, rule["line"], rule["side"], rule["odds"])
+    p_rule = np.where(rule["side"] == "over", rule["p_over"], 1 - rule["p_over"])
+    kelly = _strategy(rule, rule["line"], rule["side"], rule["odds"],
+                      kelly_stakes(pd.Series(p_rule, index=rule.index), rule["odds"]))
+    kelly["p_luck"] = np.nan  # same bets as the rule: the win/loss luck test is identical
+    rows["Shadow: model rule, Kelly-sized (same total stake)"] = kelly
     r1 = best1 >= MIN_EV
     rows["Model rule, one book (no line shopping)"] = _strategy(s[r1], line1[r1], side1[r1], odds1[r1])
     pos = best1 > 0
@@ -372,6 +397,7 @@ def evaluate(graded):
         "model_mae": float((s["actual"] - s["projection"]).abs().mean()),
         "line_mae": float((s["actual"] - market).abs().mean()),
         "model_closer_pct": float(((s["actual"] - s["projection"]).abs() < (s["actual"] - market).abs()).mean()),
+        **probability_scores(s),
     }
 
     model_side = np.where(s["ev_over"] >= s["ev_under"], "over", "under")
@@ -384,6 +410,39 @@ def evaluate(graded):
                    .reset_index())
     calibration["bucket"] = calibration["bucket"].astype(str)
     return {"strategies": strategies, "accuracy": accuracy, "calibration": calibration, "settled": s}
+
+
+def no_vig_p_over(over_odds, under_odds):
+    """Market's P(over) with the bookmaker's margin removed."""
+    po, pu = over_odds.map(implied_prob), under_odds.map(implied_prob)
+    return po / (po + pu)
+
+
+def probability_scores(s):
+    """Brier score and log loss of the model's P(over) vs. the market's, at the primary book.
+
+    Both reward confident right answers and punish confident wrong ones (log loss harshly).
+    Lower is better. `prob_skill` > 0 means the model's probabilities beat the market's.
+    """
+    s = s[s["actual"] != s["primary_line"]]  # pushes have no over/under outcome
+    if s.empty:
+        return {"prob_n": 0}
+    y = (s["actual"] > s["primary_line"]).astype(float).to_numpy()
+    model = s["primary_p_over"].astype(float).clip(0.01, 0.99).to_numpy()
+    market = no_vig_p_over(s["primary_over_odds"], s["primary_under_odds"]).to_numpy()
+
+    def brier(p):
+        return float(np.mean((p - y) ** 2))
+
+    def log_loss(p):
+        return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+    return {
+        "prob_n": int(len(y)),
+        "model_brier": brier(model), "market_brier": brier(market),
+        "model_log_loss": log_loss(model), "market_log_loss": log_loss(market),
+        "prob_skill": 1 - brier(model) / brier(market),
+    }
 
 
 def closing_value(log, closing):
