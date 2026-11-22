@@ -2,9 +2,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 
 import autobet
+import live
 import kalshi
 import model as qb_model
 from bets import payout_multiple, expected_value, get_store, grade, implied_prob, new_bet, summarize
@@ -50,8 +52,62 @@ target = next_week(schedule)
 st.title("NFL Quarterback Passing Yards")
 st.caption("Weekly projections from an XGBoost model on nflverse data, Vegas lines and kickoff weather.")
 
-tab_week, tab_exp, tab_bets, tab_record, tab_model = st.tabs(
-    ["This week", "Auto-bet experiment", "My bets", "Track record", "About the model"])
+tab_live, tab_week, tab_exp, tab_bets, tab_record, tab_model = st.tabs(
+    ["🔴 Live", "This week", "Auto-bet experiment", "My bets", "Track record", "About the model"])
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_live(season, week):
+    log = autobet.load_log()
+    return live.status(live.week_lines(log, season, week), get_model()[1])
+
+
+@st.fragment(run_every="60s")
+def live_panel():
+    week = live.current_week(autobet.load_log())
+    if week is None:
+        st.info("No lines logged yet.")
+        return
+    try:
+        rows = get_live(*week)
+    except requests.RequestException:
+        st.warning("Couldn't reach ESPN for live stats. Retrying in a minute.")
+        return
+    if rows.empty:
+        st.info("No logged games on this week's scoreboard yet.")
+        return
+    summ = live.summarize(rows)
+    c1, c2 = st.columns(2)
+    c1.metric("Settled this week", f"{summ['wins']}-{summ['losses']}", f"${summ['settled_profit']:+,.0f}")
+    c2.metric("Still to play", f"{summ['live_bets']} bets", f"{summ['in_progress']} in progress", delta_color="off")
+    if summ["live_bets"]:
+        st.caption(f"Expected profit on unsettled bets: **${summ['live_expected']:+,.0f}** "
+                   "(model's live chances; ignores game script).")
+
+    show_all = st.toggle("Show lines with no bet", value=False)
+    view = rows if show_all else rows[rows["side"].isin(["over", "under"])]
+    order = {"in": 0, "pre": 1, "post": 2}
+    view = view.assign(_o=view["state"].map(order)).sort_values(["_o", "detail"]).drop(columns="_o")
+    icon = {"win": "✅", "loss": "❌", "push": "➖"}
+    view = view.assign(
+        status=[icon.get(r, "🔴" if s == "in" else "⏳") for r, s in zip(view["result"], view["state"])],
+        bet=[f"{sd.upper()} {ln:g}" if sd in ("over", "under") else f"— {ln:g}" for sd, ln in zip(view["side"], view["line"])],
+    )
+    st.dataframe(view[["status", "qb", "bet", "yards", "pace", "live_p", "detail"]], hide_index=True,
+                 width="stretch", column_config={
+                     "status": st.column_config.TextColumn("", width="small"), "qb": "QB", "bet": "Bet",
+                     "yards": st.column_config.NumberColumn("Yds", format="%d"),
+                     "pace": st.column_config.NumberColumn("Pace", format="%d",
+                                                           help="Full-game yards at the current rate"),
+                     "live_p": st.column_config.ProgressColumn(
+                         "Chance", format="percent", min_value=0, max_value=1,
+                         help="Live chance the bet wins (for lines with no bet: chance of the over)"),
+                     "detail": "Clock"})
+    st.caption(f"Live stats from ESPN, refreshed every minute · updated {pd.Timestamp.now(tz='America/New_York'):%-I:%M %p} ET")
+
+
+with tab_live:
+    live_panel()
 
 with tab_week:
     if target is None:
@@ -320,6 +376,16 @@ with tab_exp:
             a2.metric("Line avg miss", f"{acc['line_mae']:.1f} yds")
             a3.metric("Model closer to actual", f"{acc['model_closer_pct']:.0%}", help=f"Of {acc['n']} settled lines")
             st.caption("If the line keeps missing by less than the model, the books know something the model doesn't.")
+
+            if acc.get("prob_n"):
+                st.markdown("#### Probability accuracy: model vs. market")
+                st.caption("Brier score and log loss punish confident wrong calls and reward confident right ones "
+                           "(lower is better). The market's probability is the sportsbook's odds with the vig removed. "
+                           "Positive skill means the model's probabilities beat the book's.")
+                b1, b2, b3 = st.columns(3)
+                b1.metric("Brier: model / market", f"{acc['model_brier']:.3f} / {acc['market_brier']:.3f}")
+                b2.metric("Log loss: model / market", f"{acc['model_log_loss']:.3f} / {acc['market_log_loss']:.3f}")
+                b3.metric("Skill vs. market", f"{acc['prob_skill']:+.1%}", help=f"Of {acc['prob_n']} settled lines")
 
             st.markdown("#### Calibration")
             st.caption("When the model says a side hits X% of the time, does it? Points well below the "
