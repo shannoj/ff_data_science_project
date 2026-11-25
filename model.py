@@ -215,7 +215,9 @@ def load():
 def predict(model, meta, rows):
     """Add `projection`, `low` and `high` (80% range) columns."""
     out = rows.copy()
-    if not isinstance(model, Ensemble):
+    # Duck-typed: after a code reload (Streamlit, on every deploy) a cached Ensemble is an
+    # instance of the old class, so isinstance() fails and it would be wrapped twice.
+    if not hasattr(model, "xgb"):
         model = Ensemble(model, None)
     out["projection"] = model.predict(out, meta["features"])
     out["low"] = (out["projection"] + meta["interval"]["low"]).clip(lower=0)
