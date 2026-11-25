@@ -17,8 +17,13 @@ st.set_page_config(page_title="NFL QB Passing Yards", layout="wide")
 
 
 @st.cache_resource
-def get_model():
+def _load_model(version):
     return qb_model.load()
+
+
+def get_model():
+    """The saved model, reloaded whenever the daily job commits a retrained one."""
+    return _load_model(qb_model.META_PATH.stat().st_mtime_ns)
 
 
 @st.cache_data(ttl=3 * 3600, show_spinner="Pulling the latest NFL data...")
