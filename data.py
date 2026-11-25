@@ -18,8 +18,21 @@ def load_player_stats(seasons):
     return df[df["season_type"].isin(["REG", "POST"])].reset_index(drop=True)
 
 
+SCHEDULES_CSV = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv"
+
+
 def load_schedules(seasons):
-    return nfl.load_schedules(seasons).to_pandas()
+    """Schedules via nflreadpy (parquet), falling back to the CSV copy in the same release.
+
+    nflverse re-uploads these files during updates, and the parquet has gone
+    missing for hours at a time while the CSV stayed up.
+    """
+    try:
+        return nfl.load_schedules(seasons).to_pandas()
+    except ConnectionError as e:
+        print(f"Schedules parquet unavailable ({e}); using the CSV copy.")
+        df = pd.read_csv(SCHEDULES_CSV, encoding_errors="replace", low_memory=False)
+        return df[df["season"].isin(seasons)].reset_index(drop=True)
 
 
 def load_all(through=None):
