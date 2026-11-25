@@ -86,8 +86,28 @@ class Ensemble:
         self.xgb, self.linear = xgb, linear
 
     def predict(self, X, features):
+        X = numeric_features(X, features)
         tree = _booster(self.xgb).inplace_predict(X[features].astype(float))
         return tree if self.linear is None else (tree + self.linear.predict(X)) / 2
+
+
+def numeric_features(X, features):
+    """Coerce feature columns to float; unparseable values (stray text, pd.NA) become NaN.
+
+    Both models already handle NaN (missing weather, early-season form). Logs the
+    column so a bad upstream file shows up in the app/Action logs instead of a crash.
+    """
+    X = X.copy()
+    for c in features:
+        if X[c].dtype.kind in "fiub":
+            continue
+        coerced = pd.to_numeric(X[c], errors="coerce")
+        bad = coerced.isna() & X[c].notna()
+        if bad.any():
+            print(f"Feature {c!r}: {int(bad.sum())} non-numeric value(s) treated as missing, "
+                  f"e.g. {X.loc[bad, c].iloc[0]!r}")
+        X[c] = coerced.astype(float)
+    return X
 
 
 def _metrics(y, pred):

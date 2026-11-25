@@ -114,54 +114,60 @@ with tab_week:
         st.info("No unplayed games left this season.")
     else:
         season, week = target
-        proj = get_projections(season, week)
-        st.subheader(f"{season} Week {week}")
+        try:
+            proj = get_projections(season, week)
+        except Exception as e:  # keep the other tabs usable if projections fail
+            print(f"Projections failed: {e!r}")
+            st.error(f"Couldn't build this week's projections: {e}")
+            proj = None
+        if proj is not None:
+            st.subheader(f"{season} Week {week}")
 
-        table = pd.DataFrame({
-            "QB": proj["player_display_name"],
-            "Team": proj["team"],
-            "Matchup": proj.apply(lambda r: ("vs " if r["is_home"] else "@ ") + r["opponent"], axis=1),
-            "Kickoff": pd.to_datetime(proj["gameday"] + " " + proj["gametime"]).dt.strftime("%a %b %d %-I:%M %p"),
-            "Spread": proj["spread"],
-            "Team total": proj["implied_total"],
-            "Projection": proj["projection"].round(0),
-            "80% range": proj.apply(lambda r: f"{r['low']:.0f}–{r['high']:.0f}", axis=1),
-        })
-        st.dataframe(
-            table, hide_index=True, width="stretch",
-            column_config={
-                "Spread": st.column_config.NumberColumn(format="%+.1f", help="Positive = team favored"),
-                "Team total": st.column_config.NumberColumn(format="%.1f", help="Vegas implied points"),
-                "Projection": st.column_config.ProgressColumn(
-                    format="%d yds", min_value=0, max_value=float(proj["high"].max())),
-            },
-        )
-        st.caption("Starters come from the nflverse schedule and fall back to each team's most recent starter. "
-                   "Weather is the Open-Meteo forecast at kickoff for outdoor stadiums.")
+            table = pd.DataFrame({
+                "QB": proj["player_display_name"],
+                "Team": proj["team"],
+                "Matchup": proj.apply(lambda r: ("vs " if r["is_home"] else "@ ") + r["opponent"], axis=1),
+                "Kickoff": pd.to_datetime(proj["gameday"] + " " + proj["gametime"]).dt.strftime("%a %b %d %-I:%M %p"),
+                "Spread": proj["spread"],
+                "Team total": proj["implied_total"],
+                "Projection": proj["projection"].round(0),
+                "80% range": proj.apply(lambda r: f"{r['low']:.0f}–{r['high']:.0f}", axis=1),
+            })
+            st.dataframe(
+                table, hide_index=True, width="stretch",
+                column_config={
+                    "Spread": st.column_config.NumberColumn(format="%+.1f", help="Positive = team favored"),
+                    "Team total": st.column_config.NumberColumn(format="%.1f", help="Vegas implied points"),
+                    "Projection": st.column_config.ProgressColumn(
+                        format="%d yds", min_value=0, max_value=float(proj["high"].max())),
+                },
+            )
+            st.caption("Starters come from the nflverse schedule and fall back to each team's most recent starter. "
+                       "Weather is the Open-Meteo forecast at kickoff for outdoor stadiums.")
 
-        st.markdown("#### Why this projection?")
-        qb = st.selectbox("Quarterback", proj["player_display_name"])
-        r = proj[proj["player_display_name"] == qb].iloc[0]
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**Recent form**")
-            st.metric("Yards/game, last 3", f"{r['qb_ypg_3']:.0f}" if pd.notna(r["qb_ypg_3"]) else "—")
-            st.metric("Yards/game, last 8", f"{r['qb_ypg_8']:.0f}" if pd.notna(r["qb_ypg_8"]) else "—")
-            st.metric("EPA/dropback, last 8", f"{r['qb_epa_db_8']:+.2f}" if pd.notna(r["qb_epa_db_8"]) else "—")
-        with c2:
-            st.markdown(f"**{r['opponent']} pass defense**")
-            st.metric("Yards allowed/game, last 5", f"{r['def_ypg_5']:.0f}" if pd.notna(r["def_ypg_5"]) else "—")
-            st.metric("Yards/attempt allowed, last 10", f"{r['def_ypa_10']:.2f}" if pd.notna(r["def_ypa_10"]) else "—")
-            st.metric("Sack rate, last 10", f"{r['def_sack_rate_10']:.1%}" if pd.notna(r["def_sack_rate_10"]) else "—")
-        with c3:
-            st.markdown("**Game context**")
-            st.metric("Vegas team total", f"{r['implied_total']:.1f}" if pd.notna(r["implied_total"]) else "—")
-            venue = {0.0: "Outdoors", 0.5: "Retractable roof", 1.0: "Dome"}.get(r["roof_type"], "—")
-            weather = f"{r['temp']:.0f}°F, {r['wind']:.0f} mph wind" if pd.notna(r["temp"]) and r["roof_type"] == 0 else venue
-            st.metric("Conditions", weather)
-            st.metric("Projection", f"{r['projection']:.0f} yds", help=f"80% range {r['low']:.0f}–{r['high']:.0f}")
-        if r["qb_games_prior"] < 3:
-            st.warning(f"{qb} has only {int(r['qb_games_prior'])} prior starts in the data, so this projection is shaky.")
+            st.markdown("#### Why this projection?")
+            qb = st.selectbox("Quarterback", proj["player_display_name"])
+            r = proj[proj["player_display_name"] == qb].iloc[0]
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown("**Recent form**")
+                st.metric("Yards/game, last 3", f"{r['qb_ypg_3']:.0f}" if pd.notna(r["qb_ypg_3"]) else "—")
+                st.metric("Yards/game, last 8", f"{r['qb_ypg_8']:.0f}" if pd.notna(r["qb_ypg_8"]) else "—")
+                st.metric("EPA/dropback, last 8", f"{r['qb_epa_db_8']:+.2f}" if pd.notna(r["qb_epa_db_8"]) else "—")
+            with c2:
+                st.markdown(f"**{r['opponent']} pass defense**")
+                st.metric("Yards allowed/game, last 5", f"{r['def_ypg_5']:.0f}" if pd.notna(r["def_ypg_5"]) else "—")
+                st.metric("Yards/attempt allowed, last 10", f"{r['def_ypa_10']:.2f}" if pd.notna(r["def_ypa_10"]) else "—")
+                st.metric("Sack rate, last 10", f"{r['def_sack_rate_10']:.1%}" if pd.notna(r["def_sack_rate_10"]) else "—")
+            with c3:
+                st.markdown("**Game context**")
+                st.metric("Vegas team total", f"{r['implied_total']:.1f}" if pd.notna(r["implied_total"]) else "—")
+                venue = {0.0: "Outdoors", 0.5: "Retractable roof", 1.0: "Dome"}.get(r["roof_type"], "—")
+                weather = f"{r['temp']:.0f}°F, {r['wind']:.0f} mph wind" if pd.notna(r["temp"]) and r["roof_type"] == 0 else venue
+                st.metric("Conditions", weather)
+                st.metric("Projection", f"{r['projection']:.0f} yds", help=f"80% range {r['low']:.0f}–{r['high']:.0f}")
+            if r["qb_games_prior"] < 3:
+                st.warning(f"{qb} has only {int(r['qb_games_prior'])} prior starts in the data, so this projection is shaky.")
 
 with tab_record:
     record = get_track_record()
@@ -216,8 +222,12 @@ with tab_bets:
         st.caption("On Streamlit Cloud a local file is wiped whenever the app restarts. "
                    "Add a GitHub token to the app's secrets to keep bets permanently (see `bets.py`).")
 
-    if target is not None:
-        proj = get_projections(*target)
+    try:
+        proj = get_projections(*target) if target is not None else None
+    except Exception:  # already reported on the This week tab
+        proj = None
+        st.warning("Projections are unavailable right now, so new bets can't be logged.")
+    if proj is not None:
         st.markdown("#### Log a bet")
         bet_qb = st.selectbox("Quarterback", proj["player_display_name"], key="bet_qb")
         r = proj[proj["player_display_name"] == bet_qb].iloc[0]
